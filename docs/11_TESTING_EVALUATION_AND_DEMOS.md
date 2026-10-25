@@ -79,6 +79,14 @@ These user-observed responses were potential intent-routing/capability issues, n
 - **Correction verified:** Compound hours-plus-service questions now route through the existing multi-intent capability with separate grounded FAQ queries. Slot wording routes to availability; a missing service is clarified, and the requested date is retained for a follow-up service answer. The immutable fixture has no haircut slots for the next Wednesday, 2026-11-04, and the response reports no recorded slots rather than inventing availability.
 - **Regression coverage:** Backend tests cover both compound question orders, existing hours-plus-availability behavior, deterministic single-intent routing, missing-service date preservation, no-recorded-slot behavior, Groq call bounds, and the unchanged voice/text response contract.
 
+### Full-pipeline stabilization — service matching and availability follow-ups
+
+- **Confirmed defects:** The classifier, knowledge retrieval, and availability lookup used separate service-phrase matchers. As a result, “beard trimming” could classify as a service but fail grounded FAQ retrieval, and “haircut and beard combo” was not consistently recognized. Availability follow-ups such as “What about Saturday instead?” could also misclassify conversational filler (“about”) as an unknown service.
+- **Correction:** Service aliases, phrase normalization, and overlap resolution now share one fixture-backed resolver across classification, grounded knowledge retrieval, and availability. Availability context handling treats the tested date-correction wording as a follow-up, not an unknown service. Fixture data, API contracts, and backend routing architecture are unchanged.
+- **Acceptance replay:** 18 unique utterances were sent through FastAPI and the compiled LangGraph workflow using the deterministic classifier, including same-session service/date follow-ups. All requests returned successfully and produced grounded catalog/hours/fixture answers or safe clarification/unsupported responses. No slots were inferred beyond the immutable fixture.
+- **Provider smoke check:** One sanitized live Groq request for “Is beard trimming offered at your salon?” returned a validated `faq_service_policy` classification grounded to `beard-trim`. This confirms that single request and the updated entity grounding path, not general model correctness.
+- **Automated verification:** 193 backend tests and 24 frontend tests passed; the frontend production build passed. The canonical salon fixture and Week 1 backlog were unchanged.
+
 ## Routing/agent eval
 
 Collect labeled real-like test phrases (without customer PII) representing each intent, complexity, multi-intent and danger. Compare `RulesRouter` to Jev only if integrated. Measure confusion matrix, risky false automation, F1/accuracy and latency. Confidence thresholds calibrated on held-out data; never copied from illustrative examples.

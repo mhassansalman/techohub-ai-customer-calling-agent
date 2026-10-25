@@ -23,6 +23,7 @@ from backend.models import (
     PendingAvailabilityDateContext,
     SessionStatus,
 )
+from backend.service_phrases import mentioned_service_ids
 
 
 _WEEKDAYS = (
@@ -62,6 +63,7 @@ _CORRECTION_TERMS = {"actually", "instead", "meant", "sorry"}
 _SERVICE_STOPWORDS = {
     "a",
     "an",
+    "about",
     "any",
     "appointment",
     "appointments",
@@ -503,31 +505,7 @@ def _match_service(
     message: str,
     services: tuple[ServiceFixture, ...],
 ) -> _MatchedService:
-    tokens = _ordered_tokens(message)
-    matches: list[tuple[int, int, str]] = []
-    for service in services:
-        aliases = [service.name]
-        if service.service_id == "haircut":
-            aliases.append("hair cut")
-        for alias in aliases:
-            alias_tokens = _ordered_tokens(alias)
-            for start in range(len(tokens) - len(alias_tokens) + 1):
-                if tokens[start : start + len(alias_tokens)] == alias_tokens:
-                    matches.append((start, start + len(alias_tokens), service.service_id))
-
-    non_overlapping: list[tuple[int, int, str]] = []
-    for match in sorted(
-        matches,
-        key=lambda item: (item[0], -(item[1] - item[0]), item[2]),
-    ):
-        start, end, _ = match
-        if any(
-            start < old_end and end > old_start
-            for old_start, old_end, _ in non_overlapping
-        ):
-            continue
-        non_overlapping.append(match)
-    matched_ids = {service_id for _, _, service_id in non_overlapping}
+    matched_ids = set(mentioned_service_ids(message, services))
     if len(matched_ids) > 1:
         return _MatchedService(ambiguous=True)
     if matched_ids:

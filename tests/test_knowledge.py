@@ -93,6 +93,18 @@ def test_pinned_clock_resolves_relative_days_in_utc(
             "USD 45.00",
             "45",
         ),
+        (
+            "How much is beard trimming?",
+            "Beard trim",
+            "USD 18.00",
+            "20",
+        ),
+        (
+            "How much is the haircut and beard combo?",
+            "Haircut and beard trim",
+            "USD 45.00",
+            "45",
+        ),
     ],
 )
 def test_service_price_and_duration_are_fixture_grounded(

@@ -18,6 +18,7 @@ from backend.fixtures import (
     ServiceFixture,
     load_demo_salon_fixture,
 )
+from backend.service_phrases import normalize_service_phrase, service_aliases
 
 
 DEFAULT_KNOWLEDGE_BUNDLE = Path(__file__).resolve().parents[1] / "knowledge_bundle"
@@ -353,7 +354,7 @@ def _service_record(
     service: ServiceFixture,
     index: int,
 ) -> KnowledgeRecord:
-    aliases = _service_aliases(service)
+    aliases = service_aliases(service)
     price = f"{service.price_amount:.2f}"
     return KnowledgeRecord(
         source_id=f"fixture:{fixture.fixture_id}:service:{service.service_id}",
@@ -512,13 +513,13 @@ def _match_services(
     records: tuple[KnowledgeRecord, ...],
     query: str,
 ) -> tuple[KnowledgeRecord, ...]:
-    tokens = _token_sequence(query)
+    tokens = normalize_service_phrase(query)
     matches: list[tuple[int, int, KnowledgeRecord]] = []
     for record in records:
         if record.category is not KnowledgeCategory.SERVICE:
             continue
         for alias in record.aliases:
-            alias_tokens = _token_sequence(alias)
+            alias_tokens = normalize_service_phrase(alias)
             if not alias_tokens:
                 continue
             for start in range(len(tokens) - len(alias_tokens) + 1):
@@ -757,20 +758,3 @@ def _abstention_text(reason: str) -> str:
     }:
         return "I'm not sure which approved information you mean. Please clarify."
     return "I don't have approved information to answer that question."
-
-
-def _service_aliases(service: ServiceFixture) -> tuple[str, ...]:
-    aliases = [service.name]
-    if service.service_id == "haircut":
-        aliases.append("hair cut")
-    elif service.service_id == "beard-trim":
-        aliases.append("beard trim")
-    elif service.service_id == "haircut-beard":
-        aliases.extend(
-            (
-                "haircut and beard trim",
-                "haircut beard trim",
-                "haircut and beard",
-            )
-        )
-    return tuple(dict.fromkeys(aliases))

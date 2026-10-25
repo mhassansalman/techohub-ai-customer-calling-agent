@@ -23,6 +23,7 @@ from pydantic import (
 )
 
 from backend.fixtures import ServiceFixture, load_demo_salon_fixture
+from backend.service_phrases import mentioned_service_ids
 
 
 GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -730,16 +731,8 @@ def _service_mention(
     text: str,
     services: tuple[ServiceFixture, ...],
 ) -> tuple[str | None, bool]:
-    matches: list[tuple[int, int, str]] = []
-    tokens = _normalize_service_phrase(text)
-    for service in services:
-        for alias in _service_aliases(service):
-            alias_tokens = _normalize_service_phrase(alias)
-            for start in range(len(tokens) - len(alias_tokens) + 1):
-                if tokens[start : start + len(alias_tokens)] == alias_tokens:
-                    matches.append((start, start + len(alias_tokens), service.service_id))
-    chosen = _select_non_overlapping(matches)
-    ids = {service_id for _, _, service_id in chosen}
+    ids = set(mentioned_service_ids(text, services))
+    tokens = _TOKEN.findall(text.casefold())
     if len(ids) > 1:
         return None, True
     if ids:
@@ -761,55 +754,6 @@ def _service_mention(
         )
     )
     return None, unknown_service_terms
-
-
-def _service_aliases(service: ServiceFixture) -> tuple[str, ...]:
-    aliases = [service.name]
-    if service.service_id == "haircut":
-        aliases.append("hair cut")
-    elif service.service_id == "beard-trim":
-        aliases.extend(("trim beard", "trim my beard", "beard trimming"))
-    return tuple(aliases)
-
-
-def _normalize_service_phrase(text: str) -> list[str]:
-    tokens = _TOKEN.findall(text.casefold())
-    normalized = ["trim" if token == "trimming" else token for token in tokens]
-    return [
-        token
-        for index, token in enumerate(normalized)
-        if not (
-            token == "my"
-            and index > 0
-            and index + 1 < len(normalized)
-            and normalized[index - 1] == "trim"
-            and normalized[index + 1] == "beard"
-        )
-    ]
-
-
-def _contains_service_phrase(text: str, service: ServiceFixture) -> bool:
-    words = _normalize_service_phrase(text)
-    return any(
-        (alias_words := _normalize_service_phrase(alias))
-        and any(
-            words[start : start + len(alias_words)] == alias_words
-            for start in range(len(words) - len(alias_words) + 1)
-        )
-        for alias in _service_aliases(service)
-    )
-
-
-def _select_non_overlapping(
-    matches: list[tuple[int, int, str]],
-) -> list[tuple[int, int, str]]:
-    selected: list[tuple[int, int, str]] = []
-    for match in sorted(matches, key=lambda item: (item[0], -(item[1] - item[0]), item[2])):
-        start, end, _ = match
-        if any(start < old_end and end > old_start for old_start, old_end, _ in selected):
-            continue
-        selected.append(match)
-    return selected
 
 
 def _date_entity(text: str) -> str | None:
@@ -885,13 +829,11 @@ def _validate_grounded_entities(
     entities = payload.entities
     normalized = text.casefold()
     if entities.service_id is not None:
-        service = next(
-            (item for item in services if item.service_id == entities.service_id),
-            None,
-        )
-        if service is None:
+        if entities.service_id not in {
+            service.service_id for service in services
+        }:
             raise ValueError("model selected an unknown service")
-        if not _contains_service_phrase(normalized, service):
+        if entities.service_id not in mentioned_service_ids(normalized, services):
             raise ValueError("service entity is not grounded in the user message")
     if entities.requested_date is not None:
         date_value = entities.requested_date.casefold()

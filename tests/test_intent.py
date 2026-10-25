@@ -184,6 +184,13 @@ async def test_groq_adapter_rejects_invalid_structured_output(content: str) -> N
             ),
             "How much is a haircut?",
         ),
+        (
+            _payload(
+                [Intent.FAQ_SERVICE_POLICY.value],
+                service_id="beard-trim",
+            ),
+            "How much is the haircut and beard combo?",
+        ),
     ],
 )
 async def test_groq_adapter_rejects_invented_or_unsupported_entities(
@@ -514,6 +521,7 @@ def test_rules_classify_supported_single_intents(
         ("How much is beard trimming?", "beard-trim"),
         ("How much is a haircut?", "haircut"),
         ("How much is haircut and beard trim?", "haircut-beard"),
+        ("How much is the haircut and beard combo?", "haircut-beard"),
     ],
 )
 def test_rules_recognize_canonical_and_normalized_service_phrases(

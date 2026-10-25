@@ -185,6 +185,54 @@ def test_friday_availability_and_saturday_date_correction_persist_context(
     assert fixture_path.read_bytes() == fixture_before
 
 
+def test_saturday_instead_follow_up_uses_saved_availability_context(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        session_id = _start_session(client)
+        friday = _send(
+            client,
+            session_id,
+            "Which haircut slots are open on Friday?",
+        )
+        saturday = _send(client, session_id, "What about Saturday instead?")
+
+    friday_text = friday.json()["assistant_message"]["text"]
+    saturday_text = saturday.json()["assistant_message"]["text"]
+    assert friday.status_code == saturday.status_code == 200
+    assert "Recorded fixture availability for haircut on 2026-10-30" in friday_text
+    assert "Recorded fixture availability for haircut on 2026-10-31" in saturday_text
+    assert "10:00 Etc/UTC" in saturday_text
+
+
+@pytest.mark.parametrize(
+    ("service_phrase", "service_id"),
+    [
+        ("beard trimming", "beard-trim"),
+        ("haircut and beard combo", "haircut-beard"),
+    ],
+)
+def test_availability_accepts_shared_service_aliases(
+    tmp_path: Path,
+    service_phrase: str,
+    service_id: str,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        response = _send(
+            client,
+            _start_session(client),
+            f"Do you have a {service_phrase} appointment on Friday?",
+        )
+
+    text = response.json()["assistant_message"]["text"]
+    assert response.status_code == 200
+    assert "can't confirm availability for that service" not in text
+    assert service_id in text
+    assert "no recorded fixture slots" in text
+
+
 def test_availability_slot_ids_are_retained_as_internal_sources(tmp_path: Path) -> None:
     app = _create_app(tmp_path)
     with TestClient(app) as client:
