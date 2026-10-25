@@ -1,8 +1,8 @@
 # TECHOHUB AI Customer Calling Agent
 
 An academic prototype of a transparent, knowledge-grounded customer-service
-assistant for a fictional salon. The project is initialized for local Windows
-development; application features have not yet been implemented.
+assistant for a fictional salon. The local backend includes persistent session
+lifecycle endpoints and an internal deterministic knowledge service.
 
 ## Scope
 
@@ -62,9 +62,8 @@ recordings.
 
 ## Backend scaffold
 
-The FastAPI application currently provides only the session lifecycle API
-described below. Start it from the repository root after installing the Python
-dependencies:
+The FastAPI application currently exposes the session lifecycle API below.
+Start it from the repository root after installing the Python dependencies:
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload
@@ -85,6 +84,17 @@ Session history can be read by the persistence layer for tests and trusted
 application code. A transcript-reading HTTP endpoint is intentionally absent
 until staff access control is implemented. The default local SQLite database
 is `data/techohub.db`; it is ignored by Git.
+
+### Internal knowledge service
+
+`backend.knowledge.KnowledgeService` provides deterministic, source-traceable
+answers using the approved Demo Salon fixture for operating hours and catalog
+services. It safely abstains on unsupported policies and appointment-slot
+questions. No approved FAQ Markdown bundle currently exists, so no policy
+answers are available. An optional OKF bundle can be loaded from an
+`index.md`; only index-linked, frontmatter-marked approved FAQ records are
+eligible. This internal service is not yet connected to the session API or an
+intent router.
 
 ## P03 Chrome voice compatibility check
 
