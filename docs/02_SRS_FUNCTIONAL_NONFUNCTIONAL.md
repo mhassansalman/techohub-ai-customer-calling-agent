@@ -35,6 +35,8 @@
 | FR-23 | F | External CRM/booking/helpdesk implementation | Only claim after credentials, API contract and end-to-end tests |
 | FR-24 | F | Vector knowledge retrieval | ChromaDB/FAISS/Milvus adapters planned, absent from baseline |
 
+**Priority clarification:** FR-10 is the baseline mandatory escalation requirement and permits a clear handoff state when ticketing is unavailable. FR-15 remains an enhancement for broader ticket create/update/follow-up lifecycle behavior in this SRS. The adopted Agile backlog adds a narrower P0 commitment for a customer-confirmed queued ticket with a true ID and protected staff read (E0-06, P18/P19, Week 2); P1 A16 covers ticket status-management enhancements. An honest failure satisfies T-09's fallback branch, not the queued-ticket requirement.
+
 ## Nonfunctional requirements
 
 | ID | Requirement | Objective / how tested |

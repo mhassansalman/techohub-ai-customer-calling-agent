@@ -14,7 +14,7 @@
       "hours": 3,
       "tests": "T-01",
       "depends_on": "None",
-      "done": "Not started"
+      "done": "Complete"
     },
     {
       "date": "2026-10-19",
@@ -28,7 +28,7 @@
       "hours": 3,
       "tests": "T-01",
       "depends_on": "P00",
-      "done": "Not started"
+      "done": "Complete"
     },
     {
       "date": "2026-10-20",
@@ -42,7 +42,7 @@
       "hours": 3,
       "tests": "T-10",
       "depends_on": "P00",
-      "done": "Not started"
+      "done": "Complete"
     },
     {
       "date": "2026-10-20",
@@ -56,7 +56,7 @@
       "hours": 3,
       "tests": "T-10",
       "depends_on": "P02",
-      "done": "Not started"
+      "done": "Partial — browser capability check was reported as passing, but the required browser/version and result log is not archived"
     },
     {
       "date": "2026-10-21",
@@ -70,7 +70,7 @@
       "hours": 3,
       "tests": "T-01 T-08",
       "depends_on": "P01",
-      "done": "Not started"
+      "done": "Complete"
     },
     {
       "date": "2026-10-21",
@@ -84,7 +84,7 @@
       "hours": 3,
       "tests": "T-01 T-08",
       "depends_on": "P04",
-      "done": "Not started"
+      "done": "Complete"
     },
     {
       "date": "2026-10-22",
@@ -98,7 +98,7 @@
       "hours": 3,
       "tests": "T-02 T-03",
       "depends_on": "P01 P05",
-      "done": "Not started"
+      "done": "Complete"
     },
     {
       "date": "2026-10-22",
@@ -112,7 +112,7 @@
       "hours": 3,
       "tests": "T-02 T-03",
       "depends_on": "P06",
-      "done": "Not started"
+      "done": "Complete"
     },
     {
       "date": "2026-10-23",
@@ -126,7 +126,7 @@
       "hours": 3,
       "tests": "T-04 T-05",
       "depends_on": "P04 P05",
-      "done": "Not started"
+      "done": "Complete"
     },
     {
       "date": "2026-10-23",
@@ -140,7 +140,7 @@
       "hours": 3,
       "tests": "T-04 T-05",
       "depends_on": "P08",
-      "done": "Not started"
+      "done": "Complete"
     },
     {
       "date": "2026-10-24",
@@ -154,7 +154,7 @@
       "hours": 3,
       "tests": "T-12",
       "depends_on": "P05",
-      "done": "Not started"
+      "done": "Partial — classifier implementation and mocked adapter tests are complete; free-account/quota verification and a real hosted classification are not evidenced"
     },
     {
       "date": "2026-10-24",
@@ -168,7 +168,7 @@
       "hours": 3,
       "tests": "T-12",
       "depends_on": "P10",
-      "done": "Not started"
+      "done": "Complete"
     },
     {
       "date": "2026-10-25",
@@ -182,7 +182,7 @@
       "hours": 3,
       "tests": "T-09 T-11",
       "depends_on": "P07 P09 P11",
-      "done": "Not started"
+      "done": "Complete"
     },
     {
       "date": "2026-10-25",
@@ -196,7 +196,7 @@
       "hours": 3,
       "tests": "T-09 T-11",
       "depends_on": "P12",
-      "done": "Not started"
+      "done": "Complete"
     },
     {
       "date": "2026-10-26",
@@ -264,7 +264,7 @@
       "task_id": "P18",
       "task": "Implement customer-confirmed queued handoff ticket write and true ID",
       "hours": 3,
-      "tests": "T-06 T-07",
+      "tests": "T-19",
       "depends_on": "P04 P05",
       "done": "Not started"
     },
@@ -278,7 +278,7 @@
       "task_id": "P19",
       "task": "Protect staff read/list API with server secret; deny/allow tests",
       "hours": 3,
-      "tests": "T-06 T-07",
+      "tests": "T-20",
       "depends_on": "P18",
       "done": "Not started"
     },
@@ -292,7 +292,7 @@
       "task_id": "P20",
       "task": "Run complete P0 three-intent voice/sim-call/text end-to-end suite",
       "hours": 3,
-      "tests": "T-01..T-12",
+      "tests": "T-01..T-12 T-19 T-20",
       "depends_on": "P13 P17 P19",
       "done": "Not started"
     },
@@ -306,7 +306,7 @@
       "task_id": "P21",
       "task": "Fix blockers; capture working LLM result, STT/TTS clip and staff queue evidence",
       "hours": 3,
-      "tests": "T-01..T-12",
+      "tests": "T-01..T-12 T-19 T-20",
       "depends_on": "P20",
       "done": "Not started"
     },

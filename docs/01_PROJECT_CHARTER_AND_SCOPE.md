@@ -59,6 +59,10 @@ Customer-service teams repeat routine explanations and lookups, but fully autono
 - Twilio/SIP real phone calls and SIM/GSM experimental connectivity.
 - Cloud provider fallbacks, PostgreSQL, vector-search adapters, containerized deployment.
 
+### Ticket and handoff priority clarification
+
+The baseline mandatory handoff requirement may be met by a clear handoff state or an honest failure when ticketing is unavailable; this is the alternative allowed by T-09. The adopted Agile backlog separately commits the minimum customer-confirmed queued ticket write with a true ID and protected staff read as P0 (E0-06, P18/P19, Week 2). P1 A16 covers subsequent ticket status management and lifecycle enhancements. A baseline handoff response does not count as a created ticket.
+
 ## Non-goals
 
 - A fully autonomous billing/refund authorization system.

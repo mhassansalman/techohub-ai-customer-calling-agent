@@ -11,7 +11,7 @@
 | E0-03 Hosted LLM intent | P0 | S0-06 eligible-free classifier and fallback | Real model call + allowlist classification, rate-limit safety | T-12 |
 | E0-04 Approved knowledge | P0 | S0-04 OKF retrieval/grounded reply | Source ID and unknown-source abstain | T-02 T-03 |
 | E0-05 Availability | P0 | S0-05 read-only slot lookup & context | Correct slot and date follow-up; no write | T-04 T-05 |
-| E0-06 Support ticket | P0 | S0-10 confirmed ticket+protected staff | True queued ID visible to authorized staff only | T-06 T-07 |
+| E0-06 Support ticket | P0 | S0-10 confirmed ticket+protected staff | True queued ID visible to authorized staff only | T-19 T-20 |
 | E0-07 Orchestration/test hardening | P0 | S0-07 LangGraph UI; S0-11 E2E | Three routes work and pass regression | T-01..T-12 |
 | E1-01 Semantic RAG / evidence | P1 | S1-01 index; S1-02 fusion/fallback | OKF alone and OKF+RAG correct; conflicts abstain | T-P1-01 |
 | E1-02 Urdu voice pipeline | P1 | S1-03 incoming Urdu; S1-04 outgoing Urdu | Actual Urdu ASR, translate, Urdu audio, ID/time fidelity | T-P1-02 |
@@ -54,10 +54,10 @@ Every `S0-xx`, `S1-xx` or `SF-xx` is a user/developer story under the epic shown
 | 2026-10-26 Mon | P0 | E0-02 / S0-08 | **P15** — Implement mic denial/noisy speech handling, typed fallback, metadata | 3 | T-10 T-11 | P14 |
 | 2026-10-27 Tue | P0 | E0-02 / S0-09 | **P16** — Build simulated-call start/end controls and continuous session state | 3 | T-01 T-08 T-10 | P14 |
 | 2026-10-27 Tue | P0 | E0-02 / S0-09 | **P17** — Persist voice transcript/outcome, speaker disclosure and channel audits | 3 | T-01 T-08 T-10 | P16 |
-| 2026-10-28 Wed | P0 | E0-06 / S0-10 | **P18** — Implement customer-confirmed queued handoff ticket write and true ID | 3 | T-06 T-07 | P04 P05 |
-| 2026-10-28 Wed | P0 | E0-06 / S0-10 | **P19** — Protect staff read/list API with server secret; deny/allow tests | 3 | T-06 T-07 | P18 |
-| 2026-10-29 Thu | P0 | E0-07 / S0-11 | **P20** — Run complete P0 three-intent voice/sim-call/text end-to-end suite | 3 | T-01..T-12 | P13 P17 P19 |
-| 2026-10-29 Thu | P0 | E0-07 / S0-11 | **P21** — Fix blockers; capture working LLM result, STT/TTS clip and staff queue evidence | 3 | T-01..T-12 | P20 |
+| 2026-10-28 Wed | P0 | E0-06 / S0-10 | **P18** — Implement customer-confirmed queued handoff ticket write and true ID | 3 | T-19 | P04 P05 |
+| 2026-10-28 Wed | P0 | E0-06 / S0-10 | **P19** — Protect staff read/list API with server secret; deny/allow tests | 3 | T-20 | P18 |
+| 2026-10-29 Thu | P0 | E0-07 / S0-11 | **P20** — Run complete P0 three-intent voice/sim-call/text end-to-end suite | 3 | T-01..T-12 T-19 T-20 | P13 P17 P19 |
+| 2026-10-29 Thu | P0 | E0-07 / S0-11 | **P21** — Fix blockers; capture working LLM result, STT/TTS clip and staff queue evidence | 3 | T-01..T-12 T-19 T-20 | P20 |
 | 2026-10-30 Fri | P1 | E1-01 / S1-01 | **A00** — Design approved corpus chunking and vector retrieval adapter schema | 3 | T-P1-01 | P06 P21 |
 | 2026-10-30 Fri | P1 | E1-01 / S1-01 | **A01** — Implement lightweight semantic index under laptop/budget constraints | 3 | T-P1-01 | A00 |
 | 2026-10-31 Sat | P1 | E1-01 / S1-02 | **A02** — Build combined OKF+RAG evidence fusion/de-duplication | 3 | T-P1-01 | A00 A01 |
