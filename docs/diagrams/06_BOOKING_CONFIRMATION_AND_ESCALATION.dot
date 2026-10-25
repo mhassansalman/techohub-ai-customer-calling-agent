@@ -1,0 +1,34 @@
+digraph G {
+  graph [fontname="DejaVu Sans", fontsize=17, labelloc=t, labeljust=c, bgcolor="#FFFFFF", pad=0.35, ranksep=0.7, nodesep=0.48, splines=ortho, compound=true, outputorder=edgesfirst];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, style="rounded,filled", color="#99A9C0", fillcolor="#F4F7FC", fontcolor="#18263D", penwidth=1.2, margin="0.18,0.13"];
+  edge [fontname="DejaVu Sans", fontsize=9, arrowsize=0.75, color="#637891", fontcolor="#465670", penwidth=1.5];
+
+  graph [label="06  |  Safe appointment action: no silent commitments", ranksep=0.7];
+  ask [label="Customer requests booking / change / cancellation"];
+  identify [shape=diamond,label="Identity verified if needed?",fillcolor="#EAF1FF"];
+  auth [label="Verification or clarification needed",fillcolor="#FBECEC",color="#C46767"];
+  lookup [label="BookingProvider read: fresh slots / current record"];
+  available [shape=diamond,label="Valid and available?",fillcolor="#EAF1FF"];
+  no [label="Offer alternatives or handoff",fillcolor="#FBECEC",color="#C46767"];
+  proposal [label="Show EXACT proposed action + terms\nDo not mutate yet"];
+  confirmed [shape=diamond,label="Customer explicitly confirms?",fillcolor="#EAF1FF"];
+  wait [label="Keep pending / expire / cancel\nNo side effect",fillcolor="#FBECEC",color="#C46767"];
+  write [label="Domain service checks policy + conflicts\nIdempotency key + atomic write",fillcolor="#E5F1FC",color="#4B86C6",penwidth=2];
+  ok [shape=diamond,label="Authoritative success?",fillcolor="#EAF1FF"];
+  success [label="Return committed appointment ID\nAudit status = succeeded",fillcolor="#E7F5EA",color="#4A9970"];
+  failure [label="Reconcile / explain failure / ticket/human\nNever invent confirmation",fillcolor="#FBECEC",color="#C46767"];
+  ask -> identify;
+  identify -> auth [xlabel="no"];
+  identify -> lookup [xlabel="yes or public availability"];
+  auth -> lookup [style=dotted, label="on verified retry"];
+  lookup -> available;
+  available -> no [xlabel="no"];
+  available -> proposal [xlabel="yes"];
+  proposal -> confirmed;
+  confirmed -> wait [xlabel="no / unclear"];
+  confirmed -> write [xlabel="yes"];
+  write -> ok;
+  ok -> success [xlabel="yes"];
+  ok -> failure [xlabel="no / unknown"];
+
+}

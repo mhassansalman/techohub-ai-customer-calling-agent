@@ -1,0 +1,29 @@
+digraph G {
+  graph [fontname="DejaVu Sans", fontsize=17, labelloc=t, labeljust=c, bgcolor="#FFFFFF", pad=0.35, ranksep=0.7, nodesep=0.48, splines=ortho, compound=true, outputorder=edgesfirst];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, style="rounded,filled", color="#99A9C0", fillcolor="#F4F7FC", fontcolor="#18263D", penwidth=1.2, margin="0.18,0.13"];
+  edge [fontname="DejaVu Sans", fontsize=9, arrowsize=0.75, color="#637891", fontcolor="#465670", penwidth=1.5];
+
+  graph [label="03  |  Internal services vs MCP vs provider adapters", ranksep=0.7];
+  flow [label="LangGraph simple workflow OR specialist agent"];
+  use [shape=diamond, label="How should capability be called?",fillcolor="#EAF1FF"];
+  direct [label="DIRECT NATIVE SERVICE CALL\nLower overhead for internal workflow"];
+  mcp [label="MCP CLIENT → SCOPED MCP SERVER\nReusable tool interface for AI clients"];
+  service [label="APPLICATION DOMAIN SERVICE\nOwns validation · policy · authorization", fillcolor="#E5F1FC",color="#4B86C6",penwidth=2];
+  ports [label="PROVIDER PORTS\nCRMProvider  |  BookingProvider  |  TicketProvider", fillcolor="#E5F1FC",color="#4B86C6",penwidth=2];
+  local [label="LOCAL IMPLEMENTATIONS\nSQLite CRM + booking + tickets",fillcolor="#E7F5EA",color="#4A9970"];
+  ext [label="EXTERNAL IMPLEMENTATIONS\nHubSpot/Zoho · Google Calendar/Cal.com · Zendesk\nOPTIONAL / only if built and tested",style="rounded,filled,dashed",fillcolor="#FFF4DE",color="#C58E36"];
+  safe [label="CANONICAL DOMAIN RESULT + AUDIT\nNo provider-specific schema leaks"];
+  back [label="Return result to workflow / agent"];
+  flow -> use;
+  use -> direct [xlabel="internal"];
+  use -> mcp [xlabel="interoperability"];
+  direct -> service; mcp -> service;
+  service -> ports;
+  ports -> local [xlabel="configured local"];
+  ports -> ext [xlabel="configured external"];
+  local -> safe; ext -> safe;
+  safe -> back;
+  {rank=same; direct; mcp;}
+  {rank=same; local; ext;}
+
+}

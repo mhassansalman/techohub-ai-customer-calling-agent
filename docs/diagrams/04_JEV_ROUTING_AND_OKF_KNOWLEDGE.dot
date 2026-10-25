@@ -1,0 +1,39 @@
+digraph G {
+  graph [fontname="DejaVu Sans", fontsize=17, labelloc=t, labeljust=c, bgcolor="#FFFFFF", pad=0.35, ranksep=0.7, nodesep=0.48, splines=ortho, compound=true, outputorder=edgesfirst];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, style="rounded,filled", color="#99A9C0", fillcolor="#F4F7FC", fontcolor="#18263D", penwidth=1.2, margin="0.18,0.13"];
+  edge [fontname="DejaVu Sans", fontsize=9, arrowsize=0.75, color="#637891", fontcolor="#465670", penwidth=1.5];
+
+  graph [label="04  |  Intent routing and knowledge: two different concerns", ranksep=0.72];
+  request [label="Normalized text request + session context"];
+  routerport [label="IntentRouter Port\nCanonical RoutingDecision",fillcolor="#E5F1FC",color="#4B86C6",penwidth=2];
+  rules [label="RulesRouter\nINITIAL baseline",fillcolor="#E7F5EA",color="#4A9970"];
+  jev [label="TypeSafe Jev Decision Model\nIntent Choice · Complexity Score · Risk signal\nCANDIDATE (access/benchmark first)",style="rounded,filled,dashed",fillcolor="#FFF4DE",color="#C58E36"];
+  llm [label="Structured LLM router\nOPTIONAL fallback",style="rounded,filled,dashed",fillcolor="#FFF4DE",color="#C58E36"];
+  gate [shape=diamond,label="Safe approved route?",fillcolor="#EAF1FF"];
+  straightforward [label="Simple FAQ / info workflow"];
+  complex [label="Complex knowledge agent"];
+  human [label="Clarify / Human handoff",fillcolor="#FBECEC",color="#C46767"];
+  knowledgeport [label="KnowledgeProvider Port\nsearch() · get_document()",fillcolor="#E5F1FC",color="#4B86C6",penwidth=2];
+  okf [label="OKF Navigation Adapter\nindex.md + typed Markdown + citations\nINITIAL",fillcolor="#E7F5EA",color="#4A9970"];
+  vector [label="ChromaDB / FAISS / Milvus Adapters\nFUTURE; not implemented",style="rounded,filled,dashed",fillcolor="#FFF4DE",color="#C58E36"];
+  evidence [label="Approved evidence with doc ID + version"];
+  final [label="Grounded response or explicit unknown"];
+  request -> routerport;
+  routerport -> rules [label="selected default"];
+  routerport -> jev [style=dashed,label="if enabled"];
+  routerport -> llm [style=dashed,label="if fallback"];
+  rules -> gate; jev -> gate; llm -> gate;
+  gate -> straightforward [xlabel="simple"];
+  gate -> complex [xlabel="complex"];
+  gate -> human [xlabel="uncertain/risky"];
+  straightforward -> knowledgeport;
+  complex -> knowledgeport;
+  knowledgeport -> okf;
+  knowledgeport -> vector [style=dashed, constraint=false];
+  okf -> evidence; vector -> evidence [style=dashed];
+  evidence -> final;
+  human -> final;
+  {rank=same; rules; jev; llm;}
+  {rank=same; straightforward; complex; human;}
+
+}

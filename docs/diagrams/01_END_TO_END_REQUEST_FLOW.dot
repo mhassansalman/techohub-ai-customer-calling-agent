@@ -1,0 +1,46 @@
+digraph G {
+  graph [fontname="DejaVu Sans", fontsize=17, labelloc=t, labeljust=c, bgcolor="#FFFFFF", pad=0.35, ranksep=0.7, nodesep=0.48, splines=ortho, compound=true, outputorder=edgesfirst];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, style="rounded,filled", color="#99A9C0", fillcolor="#F4F7FC", fontcolor="#18263D", penwidth=1.2, margin="0.18,0.13"];
+  edge [fontname="DejaVu Sans", fontsize=9, arrowsize=0.75, color="#637891", fontcolor="#465670", penwidth=1.5];
+
+  graph [label="01  |  End-to-end customer request and reply", ranksep=0.62];
+  customer [label="CUSTOMER\nText  |  Browser mic  |  Future phone"];
+  channel [label="CHANNEL ADAPTER\nReceive text/audio + manage session & call events"];
+  voicegate [shape=diamond,label="Audio input?",fillcolor="#EAF1FF"];
+  stt [label="STT PROVIDER\nAudio → utterance text"];
+  unified [label="UNIFIED TEXT REQUEST\ntext + session + channel + identity metadata"];
+  guard [label="PRECHECK\nDisclosure · consent · authentication/risk"];
+  route [shape=diamond,label="Intent / complexity / risk?",fillcolor="#EAF1FF"];
+  simple [label="SIMPLE WORKFLOW\nFAQ lookup / availability / routine records"];
+  complex [label="SPECIALIZED AGENT\nMulti-step complaint / knowledge / negotiation"];
+  human [label="HUMAN HANDOFF\nEscalation / follow-up ticket"];
+  capability [label="CAPABILITY SERVICES + TOOLS\nKnowledge(OKF) | CRM | Booking | Tickets\nNative calls or scoped MCP"];
+  safety [label="VERIFY RESPONSE / ACTION\nEvidence · access · explicit confirmation · idempotency"];
+  response [label="UNIFIED TEXT RESPONSE + AUDIT LOG"];
+  output [shape=diamond,label="Voice response?",fillcolor="#EAF1FF"];
+  tts [label="TTS PROVIDER\nText → output audio"];
+  deliver [label="CHANNEL ADAPTER DELIVERS\nText transcript or spoken reply"];
+  customer2 [label="CUSTOMER RECEIVES RESULT\nNext turn re-enters with same session"];
+
+  customer -> channel -> voicegate;
+  voicegate -> stt [xlabel="yes"];
+  stt -> unified;
+  voicegate -> unified [xlabel="no (text)"];
+  unified -> guard -> route;
+  route -> simple [xlabel="low complexity"];
+  route -> complex [xlabel="complex"];
+  route -> human [xlabel="unsafe / unknown"];
+  simple -> capability;
+  complex -> capability;
+  capability -> safety;
+  human -> safety;
+  safety -> response -> output;
+  output -> tts [xlabel="yes"];
+  output -> deliver [xlabel="no"];
+  tts -> deliver;
+  deliver -> customer2;
+  customer2 -> customer [style=dotted, constraint=false, xlabel="next turn"];
+  {rank=same; simple; complex; human;}
+  {rank=same; stt; unified;}
+
+}

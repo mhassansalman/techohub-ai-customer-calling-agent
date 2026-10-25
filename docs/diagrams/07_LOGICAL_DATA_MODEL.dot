@@ -1,0 +1,28 @@
+digraph ER {
+  graph [fontname="DejaVu Sans",label="07  |  Logical database relationships (conceptual ERD)",labelloc=t,fontsize=17,bgcolor="white",pad=0.4,ranksep=1.0,nodesep=0.65,splines=polyline];
+  node [shape=record,style="filled",fillcolor="#F2F7FD",color="#7095BF",fontname="DejaVu Sans",fontsize=11,margin="0.12,0.1"];
+  edge [fontname="DejaVu Sans",fontsize=10,color="#53677E",arrowsize=0.75,arrowhead=vee];
+  customer [label="{Customer|id PK\lprofile / contact\lstatus\l}",fillcolor="#E7F5EA",color="#4A9970"];
+  session [label="{ConversationSession|id PK\lcustomer_id FK?\lchannel, timestamps\lauth, consent, outcome\l}"];
+  msg [label="{Message|id PK\lsession_id FK\lrole, text, timestamp\l}"];
+  route [label="{RouteDecision|id PK\lmessage_id FK\lintent, complexity, risk\lrouter, confidence?\l}"];
+  evidence [label="{EvidenceReference|id PK\lmessage_id FK\ldocument_id, version\l}"];
+  kdoc [label="{KnowledgeDocument|id PK\lsource_path, version\lstatus, effective_at\l}",fillcolor="#E7F5EA",color="#4A9970"];
+  service [label="{Service|id PK\lname, duration\l}"];
+  booking [label="{Appointment|id PK\lcustomer_id FK\lservice_id FK\lslot/time, status\l}"];
+  ticket [label="{SupportTicket|id PK\lcustomer_id FK?\lsession_id FK?\lowner, priority, status\l}"];
+  action [label="{ActionRequest|id PK\lsession_id FK\lidempotency_key\lconfirmation_state\l}"];
+  audit [label="{AuditEvent|id PK\ltrace_id\laction, actor, outcome\l}"];
+
+  customer -> session [label="1 → many (optional)"];
+  customer -> booking [label="1 → many"];
+  customer -> ticket [label="1 → many (optional)"];
+  service -> booking [label="1 → many"];
+  session -> msg [label="1 → many"];
+  session -> action [label="1 → many"];
+  session -> ticket [label="0..1 → many"];
+  session -> audit [label="traced"];
+  msg -> route [label="1 → many"];
+  msg -> evidence [label="1 → many"];
+  kdoc -> evidence [label="1 → many versions"];
+}

@@ -1,0 +1,41 @@
+digraph G {
+  graph [fontname="DejaVu Sans",fontsize=18,label="02  |  Master architecture — simple full-system nodes and edges",labelloc=t,bgcolor="#FFFFFF",pad=0.35,ranksep=0.70,nodesep=0.55,splines=ortho,outputorder=edgesfirst];
+  node [fontname="DejaVu Sans",fontsize=11,shape=box,style="rounded,filled",color="#99A9C0",fillcolor="#F4F7FC",fontcolor="#18263D",penwidth=1.2,margin="0.18,0.13"];
+  edge [fontname="DejaVu Sans",fontsize=9,arrowsize=0.75,color="#637891",fontcolor="#465670",penwidth=1.5];
+  input [label="CUSTOMER\nText | Browser Voice | Future Twilio/SIP/SIM",fillcolor="#E5F1FC",color="#4B86C6",penwidth=2];
+  channel [label="CHANNEL ADAPTER\nSessions · web sockets · phone events · audio transport"];
+  sound [shape=diamond,label="Is input audio?",fillcolor="#EAF1FF"];
+  stt [label="STT PROVIDER\nLocal/browser now; cloud optional",fillcolor="#E7F5EA",color="#4A9970"];
+  normalized [label="NORMALIZED TEXT + METADATA\nCustomerMessage · session ID · channel · verified context",fillcolor="#E5F1FC",color="#4B86C6",penwidth=2];
+  orchestrator [label="LANGGRAPH ORCHESTRATOR + INTENT ROUTER\nRules baseline; TypeSafe Jev candidate; structured LLM fallback\nPolicy prechecks / checkpoints",fillcolor="#E5F1FC",color="#4B86C6",penwidth=2];
+  simple [label="SIMPLE WORKFLOWS\nKnown FAQ / lookup / safe scheduling"];
+  specialist [label="SPECIALIST AGENT(S)\nComplex knowledge / customer case / negotiation"];
+  escalate [label="HUMAN / CLARIFY\nUncertain, unsafe or explicit request",fillcolor="#FBECEC",color="#C46767"];
+  tools [label="DOMAIN SERVICES / TOOLS\nNative tools OR Scoped MCP exposure\nServer-side access & policy checks",fillcolor="#E5F1FC",color="#4B86C6",penwidth=2];
+  knowledge [label="KNOWLEDGE PORT\nOKF Markdown: initial\nVector DB adapters: future only",fillcolor="#E7F5EA",color="#4A9970"];
+  crm [label="CRM PORT\nLocal SQLite now / external later",fillcolor="#E7F5EA",color="#4A9970"];
+  booking [label="BOOKING PORT\nLocal SQLite now / external later",fillcolor="#E7F5EA",color="#4A9970"];
+  ticket [label="TICKET PORT\nLocal SQLite now / external later",fillcolor="#E7F5EA",color="#4A9970"];
+  validate [label="RESPONSE & ACTION SAFETY\nEvidence · identity · confirmation · atomic writes · idempotency",fillcolor="#FBECEC",color="#C46767",penwidth=2];
+  response [label="TEXT RESPONSE + SESSION OUTCOME + AUDIT",fillcolor="#E5F1FC",color="#4B86C6",penwidth=2];
+  out [shape=diamond,label="Voice output?",fillcolor="#EAF1FF"];
+  tts [label="TTS PROVIDER\nPiper / Browser now; cloud optional"];
+  deliver [label="CHANNEL ADAPTER SENDS\nReadable text or speech to customer"];
+
+  input -> channel -> sound;
+  sound -> stt [xlabel="yes"];
+  sound -> normalized [xlabel="no: typed text"];
+  stt -> normalized;
+  normalized -> orchestrator;
+  orchestrator -> simple; orchestrator -> specialist; orchestrator -> escalate;
+  simple -> tools; specialist -> tools;
+  tools -> knowledge; tools -> crm; tools -> booking; tools -> ticket;
+  knowledge -> validate; crm -> validate; booking -> validate; ticket -> validate;
+  escalate -> validate;
+  validate -> response -> out;
+  out -> tts [xlabel="yes"];
+  out -> deliver [xlabel="no"];
+  tts -> deliver;
+  {rank=same; simple; specialist; escalate;}
+  {rank=same; knowledge; crm; booking; ticket;}
+}

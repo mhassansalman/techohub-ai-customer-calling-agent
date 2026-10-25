@@ -1,0 +1,36 @@
+digraph G {
+  graph [fontname="DejaVu Sans", fontsize=17, labelloc=t, labeljust=c, bgcolor="#FFFFFF", pad=0.35, ranksep=0.7, nodesep=0.48, splines=ortho, compound=true, outputorder=edgesfirst];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, style="rounded,filled", color="#99A9C0", fillcolor="#F4F7FC", fontcolor="#18263D", penwidth=1.2, margin="0.18,0.13"];
+  edge [fontname="DejaVu Sans", fontsize=9, arrowsize=0.75, color="#637891", fontcolor="#465670", penwidth=1.5];
+
+  graph [label="05  |  Correct text / browser voice / future telephony lifecycle", ranksep=0.75];
+  customer [label="Customer starts conversation"];
+  input [shape=diamond,label="Input channel?",fillcolor="#EAF1FF"];
+  text [label="Typed chat"];
+  mic [label="Browser mic audio"];
+  tel [label="Twilio / SIP / SIM audio\nOPTIONAL experimental",style="rounded,filled,dashed",fillcolor="#FFF4DE",color="#C58E36"];
+  adapter [label="ChannelAdapter\nStart session · events · permissions · codec",fillcolor="#E5F1FC",color="#4B86C6",penwidth=2];
+  speech [shape=diamond,label="Audio received?",fillcolor="#EAF1FF"];
+  stt [label="STTProvider\nTranscribe utterance (streamable later)"];
+  unified [label="CustomerMessage\nUnified TEXT + session/channel metadata",fillcolor="#E7F5EA",color="#4A9970"];
+  ai [label="LangGraph: routing, tools, knowledge, validation"];
+  result [label="AgentResponse: verified TEXT"];
+  out [shape=diamond,label="Spoken reply needed?",fillcolor="#EAF1FF"];
+  tts [label="TTSProvider\nSynthesize speech"];
+  send [label="ChannelAdapter\nDeliver voice OR text + transcript"];
+  end [label="Customer hears/reads reply\nContinue or end session"];
+  customer -> input;
+  input -> text; input -> mic; input -> tel;
+  text -> adapter; mic -> adapter; tel -> adapter;
+  adapter -> speech;
+  speech -> stt [xlabel="yes"];
+  speech -> unified [xlabel="no"];
+  stt -> unified;
+  unified -> ai -> result -> out;
+  out -> tts [xlabel="yes"];
+  out -> send [xlabel="no"];
+  tts -> send;
+  send -> end;
+  {rank=same; text; mic; tel;}
+
+}
