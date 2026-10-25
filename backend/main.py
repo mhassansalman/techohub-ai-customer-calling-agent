@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from collections.abc import Generator
 from typing import AsyncIterator
@@ -9,6 +11,7 @@ from fastapi import Depends, FastAPI, HTTPException, Path, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from backend.availability import AvailabilityConversationService
 from backend.channels import ChannelType, CustomerRequest
 from backend.database import (
     Base,
@@ -16,6 +19,13 @@ from backend.database import (
     create_session_factory,
     database_session_dependency,
 )
+from backend.intent import (
+    ClassifierConfig,
+    GroqClassificationAdapter,
+    IntentClassifier,
+    RuleFirstIntentClassifier,
+)
+from backend.knowledge import KnowledgeService
 from backend.models import AuditEvent, ConversationSession, Message, SessionStatus
 from backend.schemas import (
     MessageResponse,
@@ -30,10 +40,19 @@ from backend.session_service import (
     SessionAlreadyClosedError,
     SessionClosedError,
     SessionNotFoundError,
-    append_customer_message,
     close_session,
     get_session,
+    persist_assistant_message,
+    persist_customer_message,
     start_session,
+)
+from backend.workflow import ConversationWorkflow, WorkflowExecutionError
+
+
+logger = logging.getLogger(__name__)
+WORKFLOW_FAILURE_RESPONSE = (
+    "I couldn't safely complete that request right now. Your message was "
+    "recorded; please try again later."
 )
 
 
@@ -76,7 +95,12 @@ def _message_response(message: Message) -> MessageResponse:
     )
 
 
-def create_app(database_url: str | None = None) -> FastAPI:
+def create_app(
+    database_url: str | None = None,
+    *,
+    workflow: ConversationWorkflow | None = None,
+    classifier: IntentClassifier | None = None,
+) -> FastAPI:
     engine = create_database_engine(database_url)
     session_factory = create_session_factory(engine)
 
@@ -92,6 +116,16 @@ def create_app(database_url: str | None = None) -> FastAPI:
     )
     app.state.database_engine = engine
     app.state.session_factory = session_factory
+    if workflow is not None and classifier is not None:
+        raise ValueError("pass either workflow or classifier, not both")
+    app.state.conversation_workflow = workflow or ConversationWorkflow(
+        classifier=classifier
+        or RuleFirstIntentClassifier(
+            GroqClassificationAdapter(ClassifierConfig.from_environment())
+        ),
+        knowledge=KnowledgeService(),
+        availability=AvailabilityConversationService(),
+    )
 
     def get_db() -> Generator[Session, None, None]:
         yield from database_session_dependency(app.state.session_factory)
@@ -145,7 +179,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 detail="Request session_id must match the URL session_id.",
             )
         try:
-            customer_message, assistant_message = append_customer_message(
+            customer_message = persist_customer_message(
                 db,
                 session_id=session_id,
                 request=payload,
@@ -164,6 +198,44 @@ def create_app(database_url: str | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(error),
+            ) from error
+
+        try:
+            workflow_result = asyncio.run(
+                app.state.conversation_workflow.run(
+                    session_id=session_id,
+                    request=payload,
+                    db=db,
+                )
+            )
+            response_text = workflow_result.response_text
+            outcome = workflow_result.outcome
+        except WorkflowExecutionError as error:
+            logger.error(
+                "Conversation workflow failed for session %s (%s)",
+                session_id,
+                type(error.__cause__).__name__ if error.__cause__ else "unknown",
+            )
+            response_text = WORKFLOW_FAILURE_RESPONSE
+            outcome = "failed"
+
+        try:
+            assistant_message = persist_assistant_message(
+                db,
+                session_id=session_id,
+                trace_id=payload.trace_id,
+                text=response_text,
+                outcome=outcome,
+            )
+        except SessionNotFoundError as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found.",
+            ) from error
+        except SessionClosedError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Session is closed.",
             ) from error
 
         return SessionMessageResponse(

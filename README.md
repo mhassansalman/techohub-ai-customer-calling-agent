@@ -55,11 +55,10 @@ npm.cmd ci
 Pop-Location
 ```
 
-The P12 browser text chat is a standalone client of the existing session
-lifecycle API. The API currently records turns and returns an explicit interim
-message; knowledge, availability, handoff, and other capability responses
-remain deferred to P13 orchestration. The compatibility page below remains a
-separate P03 spike.
+The P12 browser text chat is a client of the session lifecycle API. P13 routes
+messages through grounded FAQ and read-only availability capabilities; booking
+writes, ticket creation, CRM access, and live staff transfer remain
+unimplemented. The compatibility page below remains a separate P03 spike.
 Do not commit `.env` files, credentials, local databases, or generated
 recordings.
 
@@ -76,8 +75,8 @@ Start it from the repository root after installing the Python dependencies:
 
 - `POST /api/sessions` — create a session and persist the automated-assistant
   disclosure.
-- `POST /api/sessions/{session_id}/messages` — persist a normalized text turn
-  and return an explicit interim response until AI generation is implemented.
+- `POST /api/sessions/{session_id}/messages` — persist a normalized text turn,
+  run the LangGraph conversation workflow, and persist its grounded response.
 - `POST /api/sessions/{session_id}/end` — close an active session with a
   documented outcome.
 - `GET /api/sessions/{session_id}` — return session status and record counts,
@@ -116,11 +115,10 @@ is `data/techohub.db`; it is ignored by Git.
 `backend.knowledge.KnowledgeService` provides deterministic, source-traceable
 answers using the approved Demo Salon fixture for operating hours and catalog
 services. It safely abstains on unsupported policies and appointment-slot
-questions. No approved FAQ Markdown bundle currently exists, so no policy
-answers are available. An optional OKF bundle can be loaded from an
-`index.md`; only index-linked, frontmatter-marked approved FAQ records are
-eligible. This internal service is not yet connected to the session API or an
-intent router.
+questions. No approved FAQ Markdown bundle currently exists, so unsupported
+policy answers remain unavailable. An optional OKF bundle can be loaded from
+an `index.md`; only index-linked, frontmatter-marked approved FAQ records are
+eligible. The P13 workflow routes FAQ intents to this service.
 
 `backend.availability.AvailabilityService` returns only recorded canonical
 fixture slots and explicitly labels them as fixture data, not live calendar
@@ -128,8 +126,8 @@ availability. `AvailabilityConversationService` supports the deterministic
 Friday-to-Saturday correction through session-scoped context persisted in
 SQLite. The context stores only the selected service and requested date; it is
 isolated by session and survives a process/database reconnection. The service
-does not create, modify, or cancel appointments and is not connected to the
-session API or intent router yet.
+does not create, modify, or cancel appointments. The P13 workflow invokes it
+for availability and date-correction intents.
 
 ### Internal intent classification
 
@@ -137,7 +135,12 @@ session API or intent router yet.
 deterministic rules first and uses the Groq adapter only when a safe local
 classification cannot be established. Provider output is validated locally
 with Pydantic; classification does not answer requests, invoke tools, or
-integrate with the session API or a LangGraph workflow.
+execute business actions. `backend.workflow.ConversationWorkflow` is the
+LangGraph router used by the session message endpoint. It combines the
+classifier with grounded FAQ and read-only fixture availability capabilities.
+Booking writes, customer-account access, ticket creation, and live staff
+handoff are not implemented; the workflow reports those limitations rather
+than claiming those actions succeeded.
 
 Groq configuration is optional for local rules and tests. To enable model
 classification, set `GROQ_API_KEY` in the ignored local `.env` file or process

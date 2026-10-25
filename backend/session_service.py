@@ -194,6 +194,106 @@ def append_customer_message(
     return customer_message, assistant_message
 
 
+def persist_customer_message(
+    db: Session,
+    *,
+    session_id: UUID,
+    request: CustomerRequest,
+) -> Message:
+    conversation = get_session(db, session_id)
+    if conversation.status != SessionStatus.ACTIVE.value:
+        raise SessionClosedError(str(session_id))
+    _validate_message_session(conversation, session_id, request)
+
+    next_sequence = db.scalar(
+        select(func.max(Message.sequence)).where(Message.session_id == str(session_id))
+    )
+    customer_message = Message(
+        id=str(uuid4()),
+        session_id=str(session_id),
+        sequence=(next_sequence or 0) + 1,
+        role=MessageRole.CUSTOMER.value,
+        text=request.message_text,
+        timestamp=request.timestamp,
+        language=request.language,
+        modality=request.modality.value,
+        asr_confidence=request.asr_confidence,
+    )
+    db.add_all(
+        [
+            customer_message,
+            _audit(
+                session_id=str(session_id),
+                trace_id=str(request.trace_id),
+                actor=MessageRole.CUSTOMER.value,
+                action="message.received",
+                resource_type="message",
+                resource_id=customer_message.id,
+                outcome="success",
+            ),
+        ]
+    )
+    db.commit()
+    db.refresh(customer_message)
+    return customer_message
+
+
+def persist_assistant_message(
+    db: Session,
+    *,
+    session_id: UUID,
+    trace_id: UUID,
+    text: str,
+    outcome: str,
+) -> Message:
+    conversation = get_session(db, session_id)
+    if conversation.status != SessionStatus.ACTIVE.value:
+        raise SessionClosedError(str(session_id))
+    if not text.strip():
+        raise ValueError("assistant response cannot be blank")
+
+    next_sequence = db.scalar(
+        select(func.max(Message.sequence)).where(Message.session_id == str(session_id))
+    )
+    assistant_message = Message(
+        id=str(uuid4()),
+        session_id=str(session_id),
+        sequence=(next_sequence or 0) + 1,
+        role=MessageRole.ASSISTANT.value,
+        text=text,
+        timestamp=utc_now(),
+        modality=InputModality.TEXT.value,
+    )
+    db.add_all(
+        [
+            assistant_message,
+            _audit(
+                session_id=str(session_id),
+                trace_id=str(trace_id),
+                actor="system",
+                action="assistant.response_delivered",
+                resource_type="message",
+                resource_id=assistant_message.id,
+                outcome=outcome,
+            ),
+        ]
+    )
+    db.commit()
+    db.refresh(assistant_message)
+    return assistant_message
+
+
+def _validate_message_session(
+    conversation: ConversationSession,
+    session_id: UUID,
+    request: CustomerRequest,
+) -> None:
+    if request.session_id != session_id:
+        raise ValueError("request session_id does not match the URL session_id")
+    if request.channel_type.value != conversation.channel:
+        raise ValueError("request channel does not match the session channel")
+
+
 def close_session(
     db: Session,
     *,

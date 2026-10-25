@@ -205,8 +205,8 @@ export default function App() {
         </div>
 
         <p className="demo-note">
-          Demo mode: messages are recorded, but automated answers and salon
-          actions are not connected yet.
+          Demo mode: answers use approved salon information and recorded sample
+          appointment slots. Booking and staff actions are not available.
         </p>
 
         <div

@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from backend.main import create_app
 from backend.models import AuditEvent, ConversationSession, Message
-from backend.session_service import ASSISTANT_DISCLOSURE, INTERIM_RESPONSE
+from backend.session_service import ASSISTANT_DISCLOSURE
 
 
 def _message_payload(session_id: str) -> dict[str, object]:
@@ -42,7 +42,8 @@ def test_api_start_message_status_and_end_lifecycle(tmp_path: Path) -> None:
         assert message_payload["customer_message"]["text"] == (
             "TEST ONLY: What are your hours?"
         )
-        assert message_payload["assistant_message"]["text"] == INTERIM_RESPONSE
+        assert "Monday" in message_payload["assistant_message"]["text"]
+        assert "Etc/UTC" in message_payload["assistant_message"]["text"]
 
         status_response = client.get(f"/api/sessions/{session_id}")
         assert status_response.status_code == 200
@@ -82,7 +83,7 @@ def test_api_start_message_status_and_end_lifecycle(tmp_path: Path) -> None:
         assert {event.action for event in audits} == {
             "session.started",
             "message.received",
-            "assistant.response_pending",
+            "assistant.response_delivered",
             "session.ended",
         }
 

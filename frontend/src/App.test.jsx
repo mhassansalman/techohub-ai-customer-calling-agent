@@ -120,7 +120,7 @@ describe("browser text chat", () => {
     expect(calls.filter((call) => call.url === "/api/sessions")).toHaveLength(1);
     expect(calls.some((call) => call.url === `/api/sessions/${SESSION_ID}`)).toBe(true);
     expect(screen.getByRole("note")).toHaveTextContent(/automated assistant/i);
-    expect(screen.getByText(/automated answers and salon actions are not connected yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/answers use approved salon information and recorded sample appointment slots/i)).toBeInTheDocument();
   });
 
   it("sends the normalized text_web contract and renders both messages in sequence", async () => {
