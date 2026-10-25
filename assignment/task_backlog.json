@@ -56,7 +56,7 @@
       "hours": 3,
       "tests": "T-10",
       "depends_on": "P02",
-      "done": "Partial — browser capability check was reported as passing, but the required browser/version and result log is not archived"
+      "done": "Partial — VS Code integrated Chromium/Electron browser 150.0.7871.250; microphone permission passed; speech APIs available; recognition failed with network error; synthesis completed but audibility was not human-confirmed. See docs/11_TESTING_EVALUATION_AND_DEMOS.md."
     },
     {
       "date": "2026-10-21",
@@ -154,7 +154,7 @@
       "hours": 3,
       "tests": "T-12",
       "depends_on": "P05",
-      "done": "Partial — classifier implementation and mocked adapter tests are complete; free-account/quota verification and a real hosted classification are not evidenced"
+      "done": "Partial — one configured Groq request succeeded and returned Pydantic-validated faq_service_policy (confidence 0.90); free-account eligibility and quota limits remain unverified. See docs/11_TESTING_EVALUATION_AND_DEMOS.md."
     },
     {
       "date": "2026-10-24",

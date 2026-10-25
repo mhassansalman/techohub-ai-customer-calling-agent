@@ -39,6 +39,24 @@ T-19 and T-20 are planned acceptance tests for Week 2 tasks P18/P19; they have n
 | T-19 | Customer confirms an unresolved complaint handoff | One ticket is persisted with a true ID and owner/queue; the response reports the stored result |
 | T-20 | Staff reads/lists tickets with and without the configured credential | Authorized access succeeds; missing/invalid credentials are denied |
 
+## P03 and P10 Week 1 verification record — 2026-10-25
+
+### P03 — browser voice compatibility
+
+- **Browser/runtime:** VS Code integrated browser; user agent reported Chromium Chrome 150.0.7871.250, Electron 43.7.7, and Code/1.143.1. Page ran in a secure context over `http://127.0.0.1`.
+- **Microphone:** permission check passed; a `getUserMedia` test stream was stopped without recording.
+- **Speech recognition:** `SpeechRecognition` API was available and the test was started. The browser returned `network` before any transcript was received.
+- **Speech synthesis:** API was available; the test utterance reached the synthesis `onend` event. No human confirmation of audible output was available.
+- **Result:** **Partial.** Browser APIs and microphone permission were verified, but recognition failed in this environment and audible TTS was not confirmed. This is only the P03 compatibility spike, not an integrated voice conversation.
+
+### P10 — hosted Groq classifier
+
+- Existing configuration resolved the API key as present without printing it and selected `openai/gpt-oss-20b`; configured bounds were a 5-second attempt timeout, at most one retry, and an 8-second total deadline.
+- One safe request was sent: “Could you tell me whether pets are allowed in the salon?” The existing Groq adapter returned a successfully parsed result: `faq_service_policy`, confidence `0.90`, with no service/date entities. This verifies provider/model access for that request at that time, not classification correctness for the question.
+- Existing automated tests cover the intent allowlist and Pydantic validation, invalid structured output, timeout sanitization, bounded 429 retry, and rules/clarification fallback (`tests/test_intent.py`).
+- The single successful request does not establish whether the account is on an eligible free tier or reveal its quota limits. No account dashboard or quota evidence was available during this check.
+- **Result:** **Partial.** A live hosted classification succeeded, but the Week 1 free-account eligibility/quota prerequisite remains unverified.
+
 ## Routing/agent eval
 
 Collect labeled real-like test phrases (without customer PII) representing each intent, complexity, multi-intent and danger. Compare `RulesRouter` to Jev only if integrated. Measure confusion matrix, risky false automation, F1/accuracy and latency. Confidence thresholds calibrated on held-out data; never copied from illustrative examples.
