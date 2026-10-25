@@ -59,6 +59,15 @@ The frontend entrypoint and UI behavior are intentionally deferred to P12.
 Do not commit `.env` files, credentials, local databases, or generated
 recordings.
 
+## Backend scaffold
+
+The initialized FastAPI application has no business endpoints yet. Start it
+from the repository root after installing the Python dependencies:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload
+```
+
 ## Documentation
 
 - [Documentation index](docs/00_MASTER_INDEX.md)
