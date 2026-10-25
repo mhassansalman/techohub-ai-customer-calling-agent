@@ -55,7 +55,8 @@ npm.cmd ci
 Pop-Location
 ```
 
-The frontend entrypoint and UI behavior are intentionally deferred to P12.
+The customer-facing frontend entrypoint and UI behavior are intentionally
+deferred to P12; the compatibility page is a standalone spike only.
 Do not commit `.env` files, credentials, local databases, or generated
 recordings.
 
@@ -67,6 +68,23 @@ from the repository root after installing the Python dependencies:
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload
 ```
+
+## P03 Chrome voice compatibility check
+
+This is a manual browser capability check, not a production voice integration.
+From the repository root, start the static test page:
+
+```powershell
+py -3.12 -m http.server 8765 --directory frontend
+```
+
+Open `http://localhost:8765/voice-compatibility.html` in Google Chrome. Allow
+microphone permission, test recognition using only the displayed harmless
+phrase, and use “Speak text” to verify audible output. Record the Chrome
+version, permission outcome, exact recognition result/error, and whether TTS
+was audible. Chrome speech recognition may use an online browser service; do
+not use personal or customer data. The page does not save recordings/results
+and does not call this application’s backend.
 
 ## Documentation
 

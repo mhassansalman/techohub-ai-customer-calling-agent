@@ -1,13 +1,17 @@
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from backend.fixtures import (
+    CANONICAL_FIXTURE_PATH,
     FixtureKind,
     SalonFixtureBundle,
+    availability_for_date,
+    demo_clock,
     load_demo_salon_fixture,
     load_fixture,
 )
@@ -19,10 +23,11 @@ def test_test_only_fixture_validates_and_is_immutable(tmp_path: Path) -> None:
         "fixture_kind": "test_only",
         "fixture_id": "test-only-salon",
         "salon_name": "TEST ONLY - not canonical salon data",
+        "time_zone": "Etc/UTC",
         "pinned_clock": "2030-01-02T03:04:05+00:00",
         "business_hours": [
             {
-                "weekday": "monday",
+                "weekday": "wednesday",
                 "opens_at": "10:00:00",
                 "closes_at": "11:00:00",
             }
@@ -32,6 +37,8 @@ def test_test_only_fixture_validates_and_is_immutable(tmp_path: Path) -> None:
                 "service_id": "test-service",
                 "name": "TEST ONLY service",
                 "duration_minutes": 30,
+                "price_amount": "1.00",
+                "currency": "USD",
                 "active": True,
             }
         ],
@@ -95,6 +102,7 @@ def test_test_only_data_cannot_be_loaded_as_canonical(tmp_path: Path) -> None:
                 "fixture_kind": "test_only",
                 "fixture_id": "test-only",
                 "salon_name": "TEST ONLY",
+                "time_zone": "Etc/UTC",
                 "pinned_clock": "2030-01-02T03:04:05+00:00",
                 "business_hours": [],
                 "services": [],
@@ -113,8 +121,29 @@ def test_test_only_data_cannot_be_loaded_as_canonical(tmp_path: Path) -> None:
     ("field", "value"),
     [
         ("pinned_clock", "2030-01-02T03:04:05"),
-        ("services", [{"service_id": "x", "name": "x", "duration_minutes": 0, "active": True}]),
-        ("business_hours", [{"weekday": "monday", "opens_at": "12:00:00", "closes_at": "11:00:00"}]),
+        (
+            "services",
+            [
+                {
+                    "service_id": "x",
+                    "name": "x",
+                    "duration_minutes": 0,
+                    "price_amount": "1.00",
+                    "currency": "USD",
+                    "active": True,
+                }
+            ],
+        ),
+        (
+            "business_hours",
+            [
+                {
+                    "weekday": "monday",
+                    "opens_at": "12:00:00",
+                    "closes_at": "11:00:00",
+                }
+            ],
+        ),
     ],
 )
 def test_invalid_test_only_fixture_values_are_rejected(
@@ -125,6 +154,7 @@ def test_invalid_test_only_fixture_values_are_rejected(
         "fixture_kind": "test_only",
         "fixture_id": "test-only",
         "salon_name": "TEST ONLY",
+        "time_zone": "Etc/UTC",
         "pinned_clock": "2030-01-02T03:04:05+00:00",
         "business_hours": [],
         "services": [],
@@ -143,6 +173,7 @@ def test_fixture_rejects_unknown_service_references() -> None:
         "fixture_kind": "test_only",
         "fixture_id": "test-only",
         "salon_name": "TEST ONLY",
+        "time_zone": "Etc/UTC",
         "pinned_clock": "2030-01-02T03:04:05+00:00",
         "business_hours": [],
         "services": [],
@@ -159,4 +190,83 @@ def test_fixture_rejects_unknown_service_references() -> None:
     }
 
     with pytest.raises(ValidationError, match="unknown service_id"):
+        SalonFixtureBundle.model_validate(payload)
+
+
+def test_canonical_fixture_uses_approved_values_and_fixed_clock() -> None:
+    original_bytes = CANONICAL_FIXTURE_PATH.read_bytes()
+    fixture = load_demo_salon_fixture()
+
+    assert fixture.salon_name == "Demo Salon"
+    assert fixture.time_zone == "Etc/UTC"
+    assert demo_clock(fixture) == datetime(2026, 10, 29, 9, tzinfo=timezone.utc)
+    saturday_hours = next(
+        hours for hours in fixture.business_hours if hours.weekday == "saturday"
+    )
+    assert saturday_hours.opens_at.isoformat() == "10:00:00"
+    assert saturday_hours.closes_at.isoformat() == "16:00:00"
+    assert [
+        (service.service_id, service.price_amount, service.currency)
+        for service in fixture.services
+    ] == [
+        ("haircut", Decimal("35.00"), "USD"),
+        ("beard-trim", Decimal("18.00"), "USD"),
+        ("haircut-beard", Decimal("45.00"), "USD"),
+    ]
+    assert CANONICAL_FIXTURE_PATH.read_bytes() == original_bytes
+
+
+def test_friday_to_saturday_correction_uses_only_recorded_slots() -> None:
+    fixture = load_demo_salon_fixture()
+
+    friday_slots = availability_for_date(
+        fixture, service_id="haircut", requested_date=date(2026, 10, 30)
+    )
+    corrected_saturday_slots = availability_for_date(
+        fixture, service_id="haircut", requested_date=date(2026, 10, 31)
+    )
+    unrecorded_slots = availability_for_date(
+        fixture, service_id="haircut", requested_date=date(2026, 11, 1)
+    )
+
+    assert [slot.starts_at.isoformat() for slot in friday_slots] == [
+        "2026-10-30T10:00:00+00:00",
+        "2026-10-30T14:00:00+00:00",
+    ]
+    assert [slot.starts_at.isoformat() for slot in corrected_saturday_slots] == [
+        "2026-10-31T10:00:00+00:00"
+    ]
+    assert unrecorded_slots == ()
+
+
+def test_fixed_demo_clock_and_queries_do_not_modify_fixture_source() -> None:
+    original_bytes = CANONICAL_FIXTURE_PATH.read_bytes()
+
+    fixture = load_demo_salon_fixture()
+    clock_first_read = demo_clock(fixture)
+    availability_for_date(
+        fixture, service_id="haircut", requested_date=date(2026, 10, 31)
+    )
+    clock_second_read = demo_clock(load_demo_salon_fixture())
+
+    assert clock_first_read == clock_second_read
+    assert clock_first_read.date() == date(2026, 10, 29)
+    assert CANONICAL_FIXTURE_PATH.read_bytes() == original_bytes
+
+
+def test_fixture_rejects_non_utc_pinned_clock() -> None:
+    payload = {
+        "schema_version": "1",
+        "fixture_kind": "test_only",
+        "fixture_id": "test-only",
+        "salon_name": "TEST ONLY",
+        "time_zone": "Etc/UTC",
+        "pinned_clock": "2030-01-02T03:04:05+01:00",
+        "business_hours": [],
+        "services": [],
+        "availability_slots": [],
+        "appointments": [],
+    }
+
+    with pytest.raises(ValidationError, match="pinned_clock must use UTC"):
         SalonFixtureBundle.model_validate(payload)

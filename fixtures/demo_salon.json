@@ -1,0 +1,99 @@
+{
+  "schema_version": "1",
+  "fixture_kind": "canonical",
+  "fixture_id": "demo-salon-v1",
+  "salon_name": "Demo Salon",
+  "time_zone": "Etc/UTC",
+  "pinned_clock": "2026-10-29T09:00:00Z",
+  "business_hours": [
+    {
+      "weekday": "monday",
+      "opens_at": "09:00:00",
+      "closes_at": "18:00:00"
+    },
+    {
+      "weekday": "tuesday",
+      "opens_at": "09:00:00",
+      "closes_at": "18:00:00"
+    },
+    {
+      "weekday": "wednesday",
+      "opens_at": "09:00:00",
+      "closes_at": "18:00:00"
+    },
+    {
+      "weekday": "thursday",
+      "opens_at": "09:00:00",
+      "closes_at": "18:00:00"
+    },
+    {
+      "weekday": "friday",
+      "opens_at": "09:00:00",
+      "closes_at": "18:00:00"
+    },
+    {
+      "weekday": "saturday",
+      "opens_at": "10:00:00",
+      "closes_at": "16:00:00"
+    }
+  ],
+  "services": [
+    {
+      "service_id": "haircut",
+      "name": "Haircut",
+      "duration_minutes": 30,
+      "price_amount": "35.00",
+      "currency": "USD",
+      "active": true
+    },
+    {
+      "service_id": "beard-trim",
+      "name": "Beard trim",
+      "duration_minutes": 20,
+      "price_amount": "18.00",
+      "currency": "USD",
+      "active": true
+    },
+    {
+      "service_id": "haircut-beard",
+      "name": "Haircut and beard trim",
+      "duration_minutes": 45,
+      "price_amount": "45.00",
+      "currency": "USD",
+      "active": true
+    }
+  ],
+  "availability_slots": [
+    {
+      "slot_id": "haircut-2026-10-30-1000",
+      "service_id": "haircut",
+      "starts_at": "2026-10-30T10:00:00Z",
+      "ends_at": "2026-10-30T10:30:00Z",
+      "capacity": 1
+    },
+    {
+      "slot_id": "haircut-2026-10-30-1400",
+      "service_id": "haircut",
+      "starts_at": "2026-10-30T14:00:00Z",
+      "ends_at": "2026-10-30T14:30:00Z",
+      "capacity": 1
+    },
+    {
+      "slot_id": "haircut-2026-10-31-1000",
+      "service_id": "haircut",
+      "starts_at": "2026-10-31T10:00:00Z",
+      "ends_at": "2026-10-31T10:30:00Z",
+      "capacity": 1
+    }
+  ],
+  "appointments": [
+    {
+      "appointment_id": "demo-appointment-2026-10-30-1200",
+      "service_id": "haircut",
+      "starts_at": "2026-10-30T12:00:00Z",
+      "ends_at": "2026-10-30T12:30:00Z",
+      "status": "confirmed",
+      "customer_id": null
+    }
+  ]
+}

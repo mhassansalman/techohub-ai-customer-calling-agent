@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, time
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal
@@ -45,6 +46,8 @@ class ServiceFixture(FrozenFixtureModel):
     service_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     duration_minutes: int = Field(gt=0)
+    price_amount: Decimal = Field(gt=0)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
     active: bool
 
 
@@ -61,6 +64,10 @@ class AvailabilitySlotFixture(FrozenFixtureModel):
             raise ValueError("starts_at must be timezone-aware")
         if self.ends_at.tzinfo is None or self.ends_at.utcoffset() is None:
             raise ValueError("ends_at must be timezone-aware")
+        if self.starts_at.utcoffset() != timedelta(0):
+            raise ValueError("starts_at must use UTC")
+        if self.ends_at.utcoffset() != timedelta(0):
+            raise ValueError("ends_at must use UTC")
         if self.starts_at >= self.ends_at:
             raise ValueError("starts_at must be earlier than ends_at")
         return self
@@ -80,6 +87,10 @@ class AppointmentFixture(FrozenFixtureModel):
             raise ValueError("starts_at must be timezone-aware")
         if self.ends_at.tzinfo is None or self.ends_at.utcoffset() is None:
             raise ValueError("ends_at must be timezone-aware")
+        if self.starts_at.utcoffset() != timedelta(0):
+            raise ValueError("starts_at must use UTC")
+        if self.ends_at.utcoffset() != timedelta(0):
+            raise ValueError("ends_at must use UTC")
         if self.starts_at >= self.ends_at:
             raise ValueError("starts_at must be earlier than ends_at")
         return self
@@ -90,6 +101,7 @@ class SalonFixtureBundle(FrozenFixtureModel):
     fixture_kind: FixtureKind
     fixture_id: str = Field(min_length=1)
     salon_name: str = Field(min_length=1)
+    time_zone: Literal["Etc/UTC"]
     pinned_clock: datetime
     business_hours: tuple[BusinessHoursFixture, ...]
     services: tuple[ServiceFixture, ...]
@@ -100,6 +112,12 @@ class SalonFixtureBundle(FrozenFixtureModel):
     def validate_fixture(self) -> SalonFixtureBundle:
         if self.pinned_clock.tzinfo is None or self.pinned_clock.utcoffset() is None:
             raise ValueError("pinned_clock must be timezone-aware")
+        if self.pinned_clock.utcoffset() != timedelta(0):
+            raise ValueError("pinned_clock must use UTC")
+
+        weekdays = [hours.weekday for hours in self.business_hours]
+        if len(weekdays) != len(set(weekdays)):
+            raise ValueError("business_hours must contain at most one entry per weekday")
 
         service_ids = [service.service_id for service in self.services]
         if len(service_ids) != len(set(service_ids)):
@@ -114,9 +132,20 @@ class SalonFixtureBundle(FrozenFixtureModel):
             raise ValueError("appointment_id values must be unique")
 
         known_service_ids = set(service_ids)
+        hours_by_weekday = {
+            hours.weekday: hours for hours in self.business_hours
+        }
         for item in (*self.availability_slots, *self.appointments):
             if item.service_id not in known_service_ids:
                 raise ValueError(f"unknown service_id: {item.service_id}")
+            weekday = item.starts_at.strftime("%A").lower()
+            hours = hours_by_weekday.get(weekday)
+            if hours is None:
+                raise ValueError(f"scheduled record falls on a closed day: {weekday}")
+            if item.starts_at.time() < hours.opens_at:
+                raise ValueError("scheduled record starts before business hours")
+            if item.ends_at.time() > hours.closes_at:
+                raise ValueError("scheduled record ends after business hours")
         return self
 
 
@@ -143,4 +172,35 @@ def load_demo_salon_fixture(
     return load_fixture(
         path or CANONICAL_FIXTURE_PATH,
         expected_kind=FixtureKind.CANONICAL,
+    )
+
+
+def demo_clock(fixture: SalonFixtureBundle) -> datetime:
+    """Return the fixed demonstration clock without consulting system time."""
+    return fixture.pinned_clock
+
+
+def availability_for_date(
+    fixture: SalonFixtureBundle,
+    *,
+    service_id: str,
+    requested_date: date,
+) -> tuple[AvailabilitySlotFixture, ...]:
+    """Return only fixture records matching the requested service and UTC date."""
+    if not any(
+        service.service_id == service_id and service.active
+        for service in fixture.services
+    ):
+        return ()
+
+    return tuple(
+        sorted(
+            (
+                slot
+                for slot in fixture.availability_slots
+                if slot.service_id == service_id
+                and slot.starts_at.date() == requested_date
+            ),
+            key=lambda slot: slot.starts_at,
+        )
     )

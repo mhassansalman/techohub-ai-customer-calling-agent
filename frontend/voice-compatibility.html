@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Chrome Voice Compatibility Check</title>
+    <style>
+      :root { color-scheme: light; font: 16px/1.5 system-ui, sans-serif; }
+      body { max-width: 52rem; margin: 2rem auto; padding: 0 1rem; color: #172033; }
+      h1, h2 { line-height: 1.2; }
+      section { margin: 1.5rem 0; padding: 1rem; border: 1px solid #ccd3df; border-radius: .5rem; }
+      button { margin: .25rem .5rem .25rem 0; padding: .55rem .8rem; }
+      textarea { box-sizing: border-box; width: 100%; min-height: 6rem; }
+      output, .status { display: block; min-height: 1.5rem; margin-top: .4rem; }
+      .notice { padding: .8rem; background: #fff4d6; border-left: 4px solid #bf8000; }
+      .muted { color: #4e596d; }
+    </style>
+  </head>
+  <body>
+    <h1>Chrome voice compatibility check</h1>
+    <p>
+      This is a manual P03 spike only. It does not contact the salon app, save
+      audio, or send a request to the backend.
+    </p>
+    <p class="notice">
+      Use only the harmless test phrase “This is a browser speech test.” Do not
+      speak a real name, phone number, appointment, or other personal data.
+      Chrome speech recognition may use a browser-managed online service; it is
+      not guaranteed to work offline. Do not treat this page as a privacy-safe
+      production voice integration.
+    </p>
+
+    <section>
+      <h2>Browser and microphone permission</h2>
+      <p id="browser-info" class="muted"></p>
+      <button id="check-microphone" type="button">Check microphone permission</button>
+      <output id="microphone-status" aria-live="polite">Not tested</output>
+    </section>
+
+    <section>
+      <h2>Speech-to-text</h2>
+      <button id="start-recognition" type="button">Start one-phrase recognition</button>
+      <button id="stop-recognition" type="button" disabled>Stop recognition</button>
+      <output id="recognition-status" aria-live="polite">Not tested</output>
+    </section>
+
+    <section>
+      <h2>Text and speech output</h2>
+      <label for="speech-text">Recognized text or typed fallback</label>
+      <textarea id="speech-text">This is a browser speech test.</textarea>
+      <button id="speak-text" type="button">Speak text</button>
+      <button id="stop-speech" type="button">Stop speech</button>
+      <output id="speech-status" aria-live="polite">Not tested</output>
+    </section>
+
+    <p class="muted">
+      Results are temporary page status only. Record actual Chrome version,
+      microphone-permission outcome, recognition outcome/error, and audible TTS
+      outcome separately in the P03 review.
+    </p>
+    <script src="voice-compatibility.js"></script>
+  </body>
+</html>
