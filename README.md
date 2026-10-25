@@ -96,6 +96,15 @@ answers are available. An optional OKF bundle can be loaded from an
 eligible. This internal service is not yet connected to the session API or an
 intent router.
 
+`backend.availability.AvailabilityService` returns only recorded canonical
+fixture slots and explicitly labels them as fixture data, not live calendar
+availability. `AvailabilityConversationService` supports the deterministic
+Friday-to-Saturday correction through session-scoped context persisted in
+SQLite. The context stores only the selected service and requested date; it is
+isolated by session and survives a process/database reconnection. The service
+does not create, modify, or cancel appointments and is not connected to the
+session API or intent router yet.
+
 ## P03 Chrome voice compatibility check
 
 This is a manual browser capability check, not a production voice integration.

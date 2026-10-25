@@ -1,10 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    Date,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.database import Base, UTCDateTime
@@ -66,6 +74,36 @@ class ConversationSession(Base):
         back_populates="session",
         cascade="all, delete-orphan",
         order_by="AuditEvent.timestamp",
+    )
+    availability_context: Mapped[AvailabilityConversationContext | None] = (
+        relationship(
+            back_populates="session",
+            cascade="all, delete-orphan",
+            uselist=False,
+        )
+    )
+
+
+class AvailabilityConversationContext(Base):
+    __tablename__ = "availability_conversation_contexts"
+    __table_args__ = (
+        CheckConstraint(
+            "length(service_id) > 0",
+            name="ck_availability_context_service_id",
+        ),
+        Index("ix_availability_context_updated_at", "updated_at"),
+    )
+
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("conversation_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    service_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    requested_date: Mapped[date] = mapped_column(Date, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+    session: Mapped[ConversationSession] = relationship(
+        back_populates="availability_context"
     )
 
 
