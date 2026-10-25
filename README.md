@@ -62,12 +62,29 @@ recordings.
 
 ## Backend scaffold
 
-The initialized FastAPI application has no business endpoints yet. Start it
-from the repository root after installing the Python dependencies:
+The FastAPI application currently provides only the session lifecycle API
+described below. Start it from the repository root after installing the Python
+dependencies:
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload
 ```
+
+### Session lifecycle API
+
+- `POST /api/sessions` — create a session and persist the automated-assistant
+  disclosure.
+- `POST /api/sessions/{session_id}/messages` — persist a normalized text turn
+  and return an explicit interim response until AI generation is implemented.
+- `POST /api/sessions/{session_id}/end` — close an active session with a
+  documented outcome.
+- `GET /api/sessions/{session_id}` — return session status and record counts,
+  not transcript content.
+
+Session history can be read by the persistence layer for tests and trusted
+application code. A transcript-reading HTTP endpoint is intentionally absent
+until staff access control is implemented. The default local SQLite database
+is `data/techohub.db`; it is ignored by Git.
 
 ## P03 Chrome voice compatibility check
 
