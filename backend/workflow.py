@@ -326,6 +326,11 @@ class ConversationWorkflow:
                 "Please tell me one service and one clear date so I can check "
                 "recorded availability."
             )
+        elif classification.reason_code == "service_interest_needs_intent":
+            text = (
+                "Are you looking for information about that service, or would "
+                "you like to check appointment availability?"
+            )
         elif (
             classification.provider_error is not None
             and classification.reason_code != "invalid_classifier_result"

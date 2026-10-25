@@ -34,6 +34,17 @@ DEFAULT_GROQ_BACKOFF_SECONDS = 0.25
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _ENV_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _TOKEN = re.compile(r"[a-z0-9]+")
+_SERVICE_INTEREST_TERMS = {
+    "consider",
+    "considering",
+    "help",
+    "interested",
+    "like",
+    "looking",
+    "need",
+    "want",
+    "wants",
+}
 _ISO_DATE = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
 _WEEKDAYS = (
     "monday",
@@ -360,7 +371,7 @@ _CLASSIFIER_SYSTEM_PROMPT = """Classify the user's message only. Do not answer i
 Return one JSON object with exactly these fields:
 {"intents":["<allowed intent>"],"entities":{"service_id":null,"requested_date":null},"confidence":0.0}
 Allowed intents: faq_business_hours, faq_service_policy, appointment_availability, appointment_date_correction, appointment_create, appointment_modify, customer_account_lookup, complaint, human_request, unsupported.
-Use multiple intents only when the message clearly contains multiple supported requests. Extract a canonical service_id only when explicitly named (haircut, beard-trim, haircut-beard). requested_date must be an exact date/day phrase stated by the user, otherwise null. Never invent an entity. confidence must be a number from 0 to 1. Output JSON only; do not include explanations or reasoning."""
+Use multiple intents only when the message clearly contains multiple supported requests. Extract a canonical service_id only when explicitly named (haircut, beard-trim, haircut-beard); "trim beard", "trim my beard", and "beard trimming" refer to beard-trim. Classify appointment_create only when the user explicitly asks to book, schedule, or reserve an appointment; wanting or mentioning a service alone is not a booking request. requested_date must be an exact date/day phrase stated by the user, otherwise null. Never invent an entity. confidence must be a number from 0 to 1. Output JSON only; do not include explanations or reasoning."""
 
 
 class IntentClassifier(Protocol):
@@ -407,6 +418,7 @@ class RuleFirstIntentClassifier:
             "ambiguous_or_conflicting_date",
             "unknown_service",
             "unknown_service_in_availability_request",
+            "service_interest_needs_intent",
         }:
             return rule_result
 
@@ -425,6 +437,19 @@ class RuleFirstIntentClassifier:
                 "model_marked_unsupported",
                 source=ClassifierSource.GROQ,
             )
+        if (
+            Intent.APPOINTMENT_CREATE in payload.intents
+            and not _is_booking_create_request(
+                _TOKEN.findall(text.casefold()),
+                payload.entities.service_id,
+            )
+        ):
+            reason = (
+                "service_interest_needs_intent"
+                if payload.entities.service_id is not None
+                else "booking_requires_explicit_request"
+            )
+            return _clarification(reason, source=ClassifierSource.GROQ)
         return IntentClassification(
             status=ClassificationStatus.CLASSIFIED,
             intents=payload.intents,
@@ -471,8 +496,12 @@ def classify_with_rules(
             Intent.APPOINTMENT_MODIFY,
             reason="booking_change_request",
         )
-    if _is_booking_create_request(tokens):
-        return _rule_result(Intent.APPOINTMENT_CREATE, reason="booking_create_request")
+    if _is_booking_create_request(tokens, service_id):
+        return _rule_result(
+            Intent.APPOINTMENT_CREATE,
+            entities=ClassificationEntities(service_id=service_id),
+            reason="booking_create_request",
+        )
     if _is_account_lookup(tokens):
         return _rule_result(
             Intent.CUSTOMER_ACCOUNT_LOOKUP,
@@ -558,6 +587,8 @@ def classify_with_rules(
             entities=ClassificationEntities(service_id=service_id),
             reason="clear_service_catalog_request",
         )
+    if service_id is not None and _is_service_interest_statement(tokens):
+        return _clarification("service_interest_needs_intent")
     return _clarification("rules_could_not_establish_supported_intent")
 
 
@@ -645,6 +676,7 @@ def _is_service_question(tokens: set[str], service_id: str | None) -> bool:
         "cost",
         "duration",
         "long",
+        "much",
         "offer",
         "offers",
         "price",
@@ -669,10 +701,19 @@ def _is_booking_modify_request(tokens: set[str]) -> bool:
     )
 
 
-def _is_booking_create_request(tokens: set[str]) -> bool:
-    return bool(tokens & {"book", "schedule", "reserve"}) and bool(
-        tokens & {"appointment", "haircut", "service"}
+def _is_booking_create_request(
+    tokens: list[str] | set[str],
+    service_id: str | None = None,
+) -> bool:
+    token_set = set(tokens)
+    return bool(token_set & {"book", "schedule", "reserve"}) and bool(
+        service_id or token_set & {"appointment", "appointments", "service"}
     )
+
+
+def _is_service_interest_statement(tokens: set[str] | list[str]) -> bool:
+    token_set = set(tokens)
+    return bool(token_set & _SERVICE_INTEREST_TERMS)
 
 
 def _is_account_lookup(tokens: set[str]) -> bool:
@@ -690,13 +731,10 @@ def _service_mention(
     services: tuple[ServiceFixture, ...],
 ) -> tuple[str | None, bool]:
     matches: list[tuple[int, int, str]] = []
-    tokens = _TOKEN.findall(text)
+    tokens = _normalize_service_phrase(text)
     for service in services:
-        aliases = [service.name]
-        if service.service_id == "haircut":
-            aliases.append("hair cut")
-        for alias in aliases:
-            alias_tokens = _TOKEN.findall(alias.casefold())
+        for alias in _service_aliases(service):
+            alias_tokens = _normalize_service_phrase(alias)
             for start in range(len(tokens) - len(alias_tokens) + 1):
                 if tokens[start : start + len(alias_tokens)] == alias_tokens:
                     matches.append((start, start + len(alias_tokens), service.service_id))
@@ -723,6 +761,43 @@ def _service_mention(
         )
     )
     return None, unknown_service_terms
+
+
+def _service_aliases(service: ServiceFixture) -> tuple[str, ...]:
+    aliases = [service.name]
+    if service.service_id == "haircut":
+        aliases.append("hair cut")
+    elif service.service_id == "beard-trim":
+        aliases.extend(("trim beard", "trim my beard", "beard trimming"))
+    return tuple(aliases)
+
+
+def _normalize_service_phrase(text: str) -> list[str]:
+    tokens = _TOKEN.findall(text.casefold())
+    normalized = ["trim" if token == "trimming" else token for token in tokens]
+    return [
+        token
+        for index, token in enumerate(normalized)
+        if not (
+            token == "my"
+            and index > 0
+            and index + 1 < len(normalized)
+            and normalized[index - 1] == "trim"
+            and normalized[index + 1] == "beard"
+        )
+    ]
+
+
+def _contains_service_phrase(text: str, service: ServiceFixture) -> bool:
+    words = _normalize_service_phrase(text)
+    return any(
+        (alias_words := _normalize_service_phrase(alias))
+        and any(
+            words[start : start + len(alias_words)] == alias_words
+            for start in range(len(words) - len(alias_words) + 1)
+        )
+        for alias in _service_aliases(service)
+    )
 
 
 def _select_non_overlapping(
@@ -816,10 +891,7 @@ def _validate_grounded_entities(
         )
         if service is None:
             raise ValueError("model selected an unknown service")
-        aliases = [service.name]
-        if service.service_id == "haircut":
-            aliases.append("hair cut")
-        if not any(_contains_phrase(normalized, alias) for alias in aliases):
+        if not _contains_service_phrase(normalized, service):
             raise ValueError("service entity is not grounded in the user message")
     if entities.requested_date is not None:
         date_value = entities.requested_date.casefold()

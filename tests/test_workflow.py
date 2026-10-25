@@ -350,6 +350,35 @@ def test_explicit_wednesday_haircut_slots_report_no_fixture_slots(
     assert "not confirm real-world unavailability" in text
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "I want trim beard",
+        "I want to trim my beard",
+    ],
+)
+def test_ambiguous_beard_interest_gets_helpful_clarification(
+    tmp_path: Path,
+    message: str,
+) -> None:
+    class NoGroq:
+        async def classify(self, text: str):
+            raise AssertionError("Rule-recognized service interest should not call Groq")
+
+    app = _create_app(
+        tmp_path,
+        classifier=RuleFirstIntentClassifier(NoGroq()),
+    )
+    with TestClient(app) as client:
+        response = _send(client, _start_session(client), message)
+
+    text = response.json()["assistant_message"]["text"]
+    assert "information about that service" in text
+    assert "appointment availability" in text
+    assert "couldn't safely classify" not in text
+    assert "No appointment was created" not in text
+
+
 def test_browser_voice_and_typed_turns_keep_same_response_contract(
     tmp_path: Path,
 ) -> None:

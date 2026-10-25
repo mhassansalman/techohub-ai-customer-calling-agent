@@ -177,6 +177,13 @@ async def test_groq_adapter_rejects_invalid_structured_output(content: str) -> N
             ),
             "Do you have a haircut appointment next Friday?",
         ),
+        (
+            _payload(
+                [Intent.FAQ_SERVICE_POLICY.value],
+                service_id="beard-trim",
+            ),
+            "How much is a haircut?",
+        ),
     ],
 )
 async def test_groq_adapter_rejects_invented_or_unsupported_entities(
@@ -496,6 +503,106 @@ def test_rules_classify_supported_single_intents(
     assert result.status is ClassificationStatus.CLASSIFIED
     assert result.intents == (expected_intent,)
     assert result.source is ClassifierSource.RULES
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_service_id"),
+    [
+        ("How much is a beard trim?", "beard-trim"),
+        ("How much is a trim beard?", "beard-trim"),
+        ("How much is a trim my beard?", "beard-trim"),
+        ("How much is beard trimming?", "beard-trim"),
+        ("How much is a haircut?", "haircut"),
+        ("How much is haircut and beard trim?", "haircut-beard"),
+    ],
+)
+def test_rules_recognize_canonical_and_normalized_service_phrases(
+    text: str,
+    expected_service_id: str,
+) -> None:
+    result = classify_with_rules(text)
+
+    assert result.status is ClassificationStatus.CLASSIFIED
+    assert result.intents == (Intent.FAQ_SERVICE_POLICY,)
+    assert result.entities.service_id == expected_service_id
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I want trim beard",
+        "I want to trim my beard",
+    ],
+)
+def test_rules_clarify_general_beard_service_interest_without_groq(
+    text: str,
+) -> None:
+    result = classify_with_rules(text)
+
+    assert result.status is ClassificationStatus.CLARIFICATION
+    assert result.reason_code == "service_interest_needs_intent"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I want trim beard",
+        "I want to trim my beard",
+    ],
+)
+async def test_beard_service_interest_uses_rule_clarification_without_groq(
+    text: str,
+) -> None:
+    class NoCall:
+        async def classify(self, text: str) -> ModelClassificationPayload:
+            raise AssertionError("Recognized service interest should not call Groq")
+
+    result = await RuleFirstIntentClassifier(NoCall()).classify(text)
+
+    assert result.status is ClassificationStatus.CLARIFICATION
+    assert result.source is ClassifierSource.NONE
+    assert result.provider_error is None
+    assert result.reason_code == "service_interest_needs_intent"
+
+
+@pytest.mark.asyncio
+async def test_groq_cannot_infer_booking_from_service_mention() -> None:
+    class IncorrectBookingGroq:
+        async def classify(self, text: str) -> ModelClassificationPayload:
+            return ModelClassificationPayload.model_validate(
+                _payload(
+                    [Intent.APPOINTMENT_CREATE.value],
+                    service_id="beard-trim",
+                )
+            )
+
+    result = await RuleFirstIntentClassifier(IncorrectBookingGroq()).classify(
+        "Beard trim?"
+    )
+
+    assert result.status is ClassificationStatus.CLARIFICATION
+    assert result.source is ClassifierSource.GROQ
+    assert result.provider_error is None
+    assert result.reason_code == "service_interest_needs_intent"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Book a beard trim appointment.",
+        "I want to book a beard trim.",
+        "Schedule a beard trimming appointment.",
+    ],
+)
+def test_rules_require_explicit_booking_request_and_recognize_beard_service(
+    text: str,
+) -> None:
+    result = classify_with_rules(text)
+
+    assert result.status is ClassificationStatus.CLASSIFIED
+    assert result.intents == (Intent.APPOINTMENT_CREATE,)
+    assert result.entities.service_id == "beard-trim"
 
 
 def test_rule_classification_preserves_compound_hours_and_availability() -> None:
