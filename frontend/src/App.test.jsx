@@ -33,7 +33,7 @@ function messagePayload({ id, role, sequence, text }) {
   };
 }
 
-function mockApi({ sendDelay, sendStatus, statusStatus } = {}) {
+function mockApi({ sendDelay, sendStatus, statusStatus, assistantText = interim } = {}) {
   const calls = [];
   let messageNumber = 0;
   globalThis.fetch = vi.fn(async (url, options = {}) => {
@@ -81,7 +81,7 @@ function mockApi({ sendDelay, sendStatus, statusStatus } = {}) {
             id: `assistant-${messageNumber}`,
             role: "assistant",
             sequence: messageNumber * 2 + 1,
-            text: interim,
+            text: assistantText,
           }),
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -96,6 +96,67 @@ function mockApi({ sendDelay, sendStatus, statusStatus } = {}) {
     throw new Error(`Unexpected API request: ${options.method} ${url}`);
   });
   return calls;
+}
+
+function mockVoice({ microphoneError } = {}) {
+  const recognitions = [];
+  const utterances = [];
+  const tracks = [{ stop: vi.fn() }];
+
+  class MockSpeechRecognition {
+    start = vi.fn();
+    stop = vi.fn(() => this.onend?.());
+    abort = vi.fn(() => this.onend?.());
+
+    constructor() {
+      recognitions.push(this);
+    }
+  }
+
+  class MockSpeechSynthesisUtterance {
+    constructor(text) {
+      this.text = text;
+      utterances.push(this);
+    }
+  }
+
+  const getUserMedia = vi.fn(async () => {
+    if (microphoneError) throw microphoneError;
+    return { getTracks: () => tracks };
+  });
+  const synthesis = {
+    cancel: vi.fn(),
+    speak: vi.fn((utterance) => utterance.onstart?.()),
+  };
+
+  Object.defineProperty(window, "SpeechRecognition", {
+    configurable: true,
+    value: MockSpeechRecognition,
+  });
+  Object.defineProperty(window, "webkitSpeechRecognition", {
+    configurable: true,
+    value: undefined,
+  });
+  Object.defineProperty(window, "SpeechSynthesisUtterance", {
+    configurable: true,
+    value: MockSpeechSynthesisUtterance,
+  });
+  Object.defineProperty(window, "speechSynthesis", {
+    configurable: true,
+    value: synthesis,
+  });
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: { getUserMedia },
+  });
+
+  return { recognitions, utterances, getUserMedia, synthesis, tracks };
+}
+
+function emitRecognitionResult(recognition, transcript, isFinal = true) {
+  recognition.onresult({
+    results: [{ 0: { transcript }, isFinal }],
+  });
 }
 
 async function waitForReady() {
@@ -279,5 +340,256 @@ describe("browser text chat", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("conversation has ended");
     expect(screen.getByRole("button", { name: "Start a new conversation" })).toBeEnabled();
+  });
+
+  it("starts browser recognition and requests microphone permission", async () => {
+    const calls = mockApi();
+    const voice = mockVoice();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady();
+
+    await user.click(screen.getByRole("button", { name: "Start voice input" }));
+
+    await waitFor(() => expect(voice.recognitions).toHaveLength(1));
+    expect(voice.getUserMedia).toHaveBeenCalledWith({ audio: true });
+    expect(voice.tracks[0].stop).toHaveBeenCalledOnce();
+    expect(voice.recognitions[0].start).toHaveBeenCalledOnce();
+    expect(screen.getByRole("status")).toHaveTextContent("Listening");
+    expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(0);
+  });
+
+  it("submits a final recognized transcript through the existing chat endpoint", async () => {
+    const calls = mockApi();
+    const voice = mockVoice();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady();
+    await user.click(screen.getByRole("button", { name: "Start voice input" }));
+    await waitFor(() => expect(voice.recognitions).toHaveLength(1));
+
+    emitRecognitionResult(voice.recognitions[0], "Are you open on Wednesday?");
+
+    expect(await screen.findByText("Are you open on Wednesday?")).toBeInTheDocument();
+    const messageCalls = calls.filter((call) => call.url.endsWith("/messages"));
+    expect(messageCalls).toHaveLength(1);
+    expect(JSON.parse(messageCalls[0].options.body)).toMatchObject({
+      session_id: SESSION_ID,
+      channel_type: "text_web",
+      modality: "text",
+      message_text: "Are you open on Wednesday?",
+    });
+    expect(voice.recognitions[0].stop).toHaveBeenCalledOnce();
+  });
+
+  it("uses the same existing session for voice and subsequent typed messages", async () => {
+    const calls = mockApi({ assistantText: "Wednesday hours are 09:00–18:00 Etc/UTC." });
+    const voice = mockVoice();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady();
+    await user.click(screen.getByRole("button", { name: "Start voice input" }));
+    await waitFor(() => expect(voice.recognitions).toHaveLength(1));
+    emitRecognitionResult(voice.recognitions[0], "Are you open on Wednesday?");
+    await screen.findByText("Wednesday hours are 09:00–18:00 Etc/UTC.");
+
+    const input = screen.getByRole("textbox", { name: "Your message" });
+    await waitFor(() => expect(input).toBeEnabled());
+    await user.type(input, "How much is a haircut?");
+    await user.keyboard("{Enter}");
+    await screen.findByText("How much is a haircut?");
+
+    const createCalls = calls.filter((call) => call.url === "/api/sessions");
+    const messageCalls = calls.filter((call) => call.url.endsWith("/messages"));
+    expect(createCalls).toHaveLength(1);
+    expect(messageCalls).toHaveLength(2);
+    expect(messageCalls.map((call) => JSON.parse(call.options.body).session_id)).toEqual([
+      SESSION_ID,
+      SESSION_ID,
+    ]);
+  });
+
+  it("speaks the actual backend assistant response, not the recognized transcript", async () => {
+    const answer = "We are open Wednesday from 9 AM to 6 PM.";
+    mockApi({ assistantText: answer });
+    const voice = mockVoice();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady();
+    await user.click(screen.getByRole("button", { name: "Start voice input" }));
+    await waitFor(() => expect(voice.recognitions).toHaveLength(1));
+    emitRecognitionResult(voice.recognitions[0], "Are you open on Wednesday?");
+
+    expect(await screen.findByText(answer)).toBeInTheDocument();
+    await waitFor(() => expect(voice.synthesis.speak).toHaveBeenCalledOnce());
+    expect(voice.utterances[0].text).toBe(answer);
+    expect(voice.utterances[0].text).not.toBe("Are you open on Wednesday?");
+  });
+
+  it("keeps typed-message responses text-only by default", async () => {
+    mockApi({ assistantText: "A grounded typed answer." });
+    const voice = mockVoice();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady();
+    await user.type(screen.getByRole("textbox", { name: "Your message" }), "Typed question");
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByText("A grounded typed answer.")).toBeInTheDocument();
+    expect(voice.synthesis.speak).not.toHaveBeenCalled();
+  });
+
+  it("ignores interim results and duplicate final recognition events", async () => {
+    const calls = mockApi();
+    const voice = mockVoice();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady();
+    await user.click(screen.getByRole("button", { name: "Start voice input" }));
+    await waitFor(() => expect(voice.recognitions).toHaveLength(1));
+    const recognition = voice.recognitions[0];
+
+    emitRecognitionResult(recognition, "Are you open on Wednesday?", false);
+    expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(0);
+    emitRecognitionResult(recognition, "Are you open on Wednesday?");
+    emitRecognitionResult(recognition, "Are you open on Wednesday?");
+
+    await screen.findByText("Are you open on Wednesday?");
+    expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(1);
+  });
+
+  it("reports unsupported speech recognition without breaking typed chat", async () => {
+    const calls = mockApi();
+    Object.defineProperty(window, "SpeechRecognition", {
+      configurable: true,
+      value: undefined,
+    });
+    Object.defineProperty(window, "webkitSpeechRecognition", {
+      configurable: true,
+      value: undefined,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady();
+    await user.click(screen.getByRole("button", { name: "Start voice input" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Voice input is not supported in this browser",
+    );
+    const input = screen.getByRole("textbox", { name: "Your message" });
+    await user.type(input, "Typed fallback");
+    await user.keyboard("{Enter}");
+    expect(await screen.findByText("Typed fallback")).toBeInTheDocument();
+    expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(1);
+  });
+
+  it("handles denied microphone permission and recognition network errors", async () => {
+    const deniedVoice = mockVoice({ microphoneError: new DOMException("denied", "NotAllowedError") });
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady();
+    await user.click(screen.getByRole("button", { name: "Start voice input" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Microphone permission was denied");
+    expect(deniedVoice.recognitions).toHaveLength(0);
+    cleanup();
+
+    const networkVoice = mockVoice();
+    render(<App />);
+    await waitForReady();
+    await user.click(screen.getByRole("button", { name: "Start voice input" }));
+    await waitFor(() => expect(networkVoice.recognitions).toHaveLength(1));
+    networkVoice.recognitions[0].onerror({ error: "network" });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Speech recognition could not reach its service",
+    );
+  });
+
+  it("reports no speech when recognition ends without a final transcript", async () => {
+    const voice = mockVoice();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady();
+    await user.click(screen.getByRole("button", { name: "Start voice input" }));
+    await waitFor(() => expect(voice.recognitions).toHaveLength(1));
+    voice.recognitions[0].onend();
+
+    expect(await screen.findByRole("status")).toHaveTextContent("No speech was recognized");
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+  });
+
+  it("cancels active recognition without submitting a message", async () => {
+    const calls = mockApi();
+    const voice = mockVoice();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady();
+    await user.click(screen.getByRole("button", { name: "Start voice input" }));
+    await waitFor(() => expect(voice.recognitions).toHaveLength(1));
+
+    await user.click(screen.getByRole("button", { name: "Cancel voice input" }));
+
+    expect(voice.recognitions[0].abort).toHaveBeenCalledOnce();
+    expect(await screen.findByRole("status")).toHaveTextContent("Voice input cancelled");
+    expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(0);
+  });
+
+  it("keeps the assistant response readable when speech synthesis is unavailable", async () => {
+    const answer = "The assistant response remains available as text.";
+    mockApi({ assistantText: answer });
+    const voice = mockVoice();
+    Object.defineProperty(window, "speechSynthesis", {
+      configurable: true,
+      value: undefined,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady();
+    await user.click(screen.getByRole("button", { name: "Start voice input" }));
+    await waitFor(() => expect(voice.recognitions).toHaveLength(1));
+    emitRecognitionResult(voice.recognitions[0], "Please answer me.");
+
+    expect(await screen.findByText(answer)).toBeInTheDocument();
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Voice reply is unavailable in this browser",
+    );
+    expect(voice.synthesis.speak).not.toHaveBeenCalled();
+  });
+
+  it("stops playback and cancels overlapping TTS before speaking another voice response", async () => {
+    const calls = mockApi({ assistantText: "Assistant answer." });
+    const voice = mockVoice();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady();
+    await user.click(screen.getByRole("button", { name: "Start voice input" }));
+    await waitFor(() => expect(voice.recognitions).toHaveLength(1));
+    emitRecognitionResult(voice.recognitions[0], "First voice question");
+    await screen.findByText("Assistant answer.");
+    await waitFor(() => expect(voice.synthesis.speak).toHaveBeenCalledOnce());
+    await user.click(screen.getByRole("button", { name: "Stop speech" }));
+    expect(voice.synthesis.cancel).toHaveBeenCalled();
+    expect(await screen.findByRole("status")).toHaveTextContent("Speech playback stopped");
+
+    await user.click(screen.getByRole("button", { name: "Start voice input" }));
+    await waitFor(() => expect(voice.recognitions).toHaveLength(2));
+    emitRecognitionResult(voice.recognitions[1], "Second voice question");
+    await waitFor(() => expect(voice.synthesis.speak).toHaveBeenCalledTimes(2));
+    expect(voice.synthesis.cancel.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(2);
+  });
+
+  it("does not invoke TTS when the voice message request fails", async () => {
+    mockApi({ sendStatus: 500 });
+    const voice = mockVoice();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady();
+    await user.click(screen.getByRole("button", { name: "Start voice input" }));
+    await waitFor(() => expect(voice.recognitions).toHaveLength(1));
+    emitRecognitionResult(voice.recognitions[0], "Are you open Wednesday?");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("server error 500");
+    expect(voice.synthesis.speak).not.toHaveBeenCalled();
+    expect(screen.queryByText("Are you open Wednesday?", { selector: ".message-bubble" })).not.toBeInTheDocument();
   });
 });

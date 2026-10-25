@@ -456,6 +456,57 @@ a:focus-visible {
   cursor: not-allowed;
 }
 
+.voice-button {
+  min-width: 58px;
+  height: 36px;
+  flex: 0 0 auto;
+  padding: 0 9px;
+  border: 1px solid #d7e1d8;
+  border-radius: 9px;
+  color: var(--green-dark);
+  background: #f5f8f3;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.voice-button:hover:not(:disabled),
+.voice-button.is-listening {
+  border-color: #8eb29d;
+  background: #e9f2e9;
+}
+
+.voice-button:disabled {
+  color: #a8b1ab;
+  background: #edf0eb;
+  cursor: not-allowed;
+}
+
+.voice-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 2px 0;
+  color: #59664b;
+  font-size: 11px;
+}
+
+.voice-feedback-error {
+  color: #7c3429;
+}
+
+.voice-feedback button {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid #d7e1d8;
+  border-radius: 7px;
+  color: var(--green-dark);
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
 .composer-footer {
   display: flex;
   justify-content: space-between;

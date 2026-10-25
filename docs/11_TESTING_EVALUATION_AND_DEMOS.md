@@ -15,6 +15,7 @@ Every mandatory assignment requirement must map to an automated test, a manual s
 ## Minimum scenario matrix
 
 T-19 and T-20 are planned acceptance tests for Week 2 tasks P18/P19; they have not yet been executed.
+T-21 is the browser voice-chat acceptance test for P14.
 
 | Test ID | Input / situation | Expected result |
 |---|---|---|
@@ -38,6 +39,7 @@ T-19 and T-20 are planned acceptance tests for Week 2 tasks P18/P19; they have n
 | T-18 | Unsupported language / code switch | Graceful fallback; no fabricated transcript |
 | T-19 | Customer confirms an unresolved complaint handoff | One ticket is persisted with a true ID and owner/queue; the response reports the stored result |
 | T-20 | Staff reads/lists tickets with and without the configured credential | Authorized access succeeds; missing/invalid credentials are denied |
+| T-21 | Speak a question in the React chat, then send a typed question in the same session | Final speech transcript uses the existing backend session; the actual returned assistant answer appears and is spoken; typed follow-up continues in that session |
 
 ## P03 and P10 Week 1 verification record — 2026-10-25
 
@@ -56,6 +58,24 @@ T-19 and T-20 are planned acceptance tests for Week 2 tasks P18/P19; they have n
 - Existing automated tests cover the intent allowlist and Pydantic validation, invalid structured output, timeout sanitization, bounded 429 retry, and rules/clarification fallback (`tests/test_intent.py`).
 - The single successful request does not establish whether the account is on an eligible free tier or reveal its quota limits. No account dashboard or quota evidence was available during this check.
 - **Result:** **Partial.** A live hosted classification succeeded, but the Week 1 free-account eligibility/quota prerequisite remains unverified.
+
+## P14 browser voice-chat integration verification — 2026-10-25
+
+- **Implementation:** The React chat now requests microphone access, starts browser speech recognition, submits a non-empty final transcript through the existing message API, and speaks only the actual assistant response returned by that successful request. Typed turns continue to use the same session and stay text-only. Recognition cancellation, duplicate final events, browser API absence, permission failures, and speech playback failures have focused frontend coverage.
+- **Automated results:** All 24 frontend tests passed, including mocked Web Speech API checks for same-session submission and assistant-response TTS. The frontend production build passed. These mocks do not establish live microphone recognition or audible playback.
+- **Browser/runtime:** VS Code integrated browser, Chromium Chrome 150.0.7871.250 / Electron 43.7.7; `http://127.0.0.1:5173` was a secure context. Both `SpeechRecognition` and `speechSynthesis` APIs were present.
+- **Microphone and recognition:** Clicking the React microphone requested access and advanced to the listening state, confirming the browser permission request completed. Speech recognition then reported a `network` error before producing a transcript. No voice-originated request reached the backend and no voice response was spoken.
+- **Typed same-session check:** After recognition failed, a typed “Are you open on Wednesday?” turn in that same browser session reached the real FastAPI/LangGraph workflow and displayed “Demo Salon is open on Wednesday, 09:00–18:00 Etc/UTC.” Typed responses intentionally do not trigger TTS.
+- **Additional Chrome acceptance (user-observed):** The user manually verified the complete flow in regular Google Chrome: “Are you open on Sunday?” was recognized and appeared in the React conversation; the existing backend returned “Demo Salon is closed on Sunday.”; that response appeared in chat and was audibly spoken by browser TTS; the interface displayed “Voice reply finished.” The Chrome version was not provided. This is user-reported acceptance evidence, distinct from the earlier VS Code integrated-browser failure above.
+- **Result:** **Complete; T-21 passed.** The user-observed Chrome run verifies final speech transcription, transcript display, actual backend response, and audible speech of that response. The frontend test suite verifies voice and typed turns share the existing session and endpoint. The earlier P03 compatibility result remains unchanged and is not retroactively upgraded.
+
+### Separate observations for follow-up investigation
+
+These user-observed responses are potential intent-routing/capability issues, not failures of the P14 voice transport integration. They are recorded for a focused follow-up; no backend behavior was changed during P14 finalization.
+
+- “Are you open on Sunday? How much is one haircut?” produced a clarification response rather than handling both intents.
+- “Which slots are open on Wednesday?” produced “I can't confirm appointment slots from the service catalog.”
+- **Disposition:** Investigate intent classification, multi-intent handling, and appointment-availability capability routing separately. Do not infer a root cause or change unrelated backend behavior as part of P14 closure.
 
 ## Routing/agent eval
 

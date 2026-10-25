@@ -208,9 +208,9 @@
       "task_id": "P14",
       "task": "Complete live mic\u2192STT\u2192backend response\u2192audible TTS loop",
       "hours": 3,
-      "tests": "T-10 T-11",
+      "tests": "T-21",
       "depends_on": "P03 P12",
-      "done": "Not started"
+      "done": "Complete — React voice chat passed user-observed Chrome end-to-end acceptance; see docs/11_TESTING_EVALUATION_AND_DEMOS.md."
     },
     {
       "date": "2026-10-26",

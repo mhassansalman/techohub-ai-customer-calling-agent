@@ -41,6 +41,19 @@ Keep optional raw audio references out of LangGraph state unless specifically ne
 
 Browser speech APIs are not universally available, offline or consistent; always provide typed fallback. Local TTS/STT runtime performance and language quality must be benchmarked rather than assumed.
 
+## Browser voice chat integration — P14
+
+The React chat microphone uses browser speech recognition and submits only a
+final transcript through the existing text message endpoint and active session.
+After a successful voice-originated request, browser speech synthesis speaks
+the returned assistant message; typed-message replies remain text-only. The
+separate `voice-compatibility.html` page remains available for API diagnostics.
+
+Frontend tests mock the browser speech APIs and verify same-session submission,
+final-result de-duplication, assistant-response TTS, cancellation and error
+fallbacks. The live browser acceptance status and remaining limitation are
+recorded under P14 in [the testing and evaluation record](11_TESTING_EVALUATION_AND_DEMOS.md).
+
 ## Streaming upgrade path
 
 **Phase 1:** Record/stream one utterance, transcribe, get answer, synthesize playback. This supports the graded demo and is debuggable.  
