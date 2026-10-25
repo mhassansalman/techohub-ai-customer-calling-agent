@@ -105,6 +105,22 @@ isolated by session and survives a process/database reconnection. The service
 does not create, modify, or cancel appointments and is not connected to the
 session API or intent router yet.
 
+### Internal intent classification
+
+`backend.intent.RuleFirstIntentClassifier` classifies supported requests with
+deterministic rules first and uses the Groq adapter only when a safe local
+classification cannot be established. Provider output is validated locally
+with Pydantic; classification does not answer requests, invoke tools, or
+integrate with the session API or a LangGraph workflow.
+
+Groq configuration is optional for local rules and tests. To enable model
+classification, set `GROQ_API_KEY` in the ignored local `.env` file or process
+environment. `GROQ_MODEL` defaults to `openai/gpt-oss-20b`;
+`GROQ_TIMEOUT_SECONDS`, `GROQ_MAX_RETRIES`, `GROQ_TOTAL_DEADLINE_SECONDS`, and
+`GROQ_BACKOFF_SECONDS` can tune the bounded retry policy (at most one retry,
+five seconds per attempt, and eight seconds total). Never commit `.env` or
+include the key in logs or command-line arguments.
+
 ## P03 Chrome voice compatibility check
 
 This is a manual browser capability check, not a production voice integration.
