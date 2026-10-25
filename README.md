@@ -55,8 +55,11 @@ npm.cmd ci
 Pop-Location
 ```
 
-The customer-facing frontend entrypoint and UI behavior are intentionally
-deferred to P12; the compatibility page is a standalone spike only.
+The P12 browser text chat is a standalone client of the existing session
+lifecycle API. The API currently records turns and returns an explicit interim
+message; knowledge, availability, handoff, and other capability responses
+remain deferred to P13 orchestration. The compatibility page below remains a
+separate P03 spike.
 Do not commit `.env` files, credentials, local databases, or generated
 recordings.
 
@@ -79,6 +82,29 @@ Start it from the repository root after installing the Python dependencies:
   documented outcome.
 - `GET /api/sessions/{session_id}` — return session status and record counts,
   not transcript content.
+
+### Run the P12 browser text chat
+
+Run the backend from the repository root in one PowerShell terminal:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+In a second terminal, start the Vite development server:
+
+```powershell
+Push-Location frontend
+npm.cmd ci
+npm.cmd run dev
+Pop-Location
+```
+
+Open the local URL printed by Vite (by default `http://127.0.0.1:5173`).
+The development server proxies `/api` requests to `127.0.0.1:8000`; no API
+key or provider credential is sent to the browser. Run the frontend tests and
+production build from the `frontend` directory with `npm.cmd test` and
+`npm.cmd run build`.
 
 Session history can be read by the persistence layer for tests and trusted
 application code. A transcript-reading HTTP endpoint is intentionally absent
