@@ -20,6 +20,7 @@ from backend.fixtures import (
 from backend.models import (
     AvailabilityConversationContext,
     ConversationSession,
+    PendingAvailabilityDateContext,
     SessionStatus,
 )
 
@@ -76,8 +77,12 @@ _SERVICE_STOPWORDS = {
     "do",
     "for",
     "have",
+    "hours",
     "i",
     "is",
+    "which",
+    "open",
+    "closed",
     "it",
     "on",
     "we",
@@ -274,13 +279,6 @@ class AvailabilityConversationService:
 
         has_availability_intent = _has_availability_intent(message)
         is_correction = _has_correction_intent(message)
-        if not has_availability_intent and not is_correction:
-            return _response(
-                AvailabilityStatus.UNSUPPORTED,
-                "not_an_availability_request",
-                session_id=session_id,
-            )
-
         service_result = _match_service(
             message,
             self.availability.fixture.services,
@@ -293,6 +291,21 @@ class AvailabilityConversationService:
             )
 
         context = db.get(AvailabilityConversationContext, session_key)
+        pending_date_context = db.get(PendingAvailabilityDateContext, session_key)
+        if (
+            not has_availability_intent
+            and not is_correction
+            and not (
+                pending_date_context is not None
+                and service_result.service_id is not None
+            )
+        ):
+            return _response(
+                AvailabilityStatus.UNSUPPORTED,
+                "not_an_availability_request",
+                session_id=session_id,
+            )
+
         service_id = service_result.service_id
         if service_result.mentions_unknown:
             return _response(
@@ -304,7 +317,15 @@ class AvailabilityConversationService:
         if service_id is None and context is not None:
             service_id = context.service_id
 
-        if parsed_date.value is None:
+        requested_date = parsed_date.value
+        if (
+            requested_date is None
+            and service_result.service_id is not None
+            and pending_date_context is not None
+        ):
+            requested_date = pending_date_context.requested_date
+
+        if requested_date is None:
             if is_correction:
                 return _response(
                     AvailabilityStatus.NEEDS_CONTEXT,
@@ -317,6 +338,7 @@ class AvailabilityConversationService:
                 "request_requires_a_date",
                 session_id=session_id,
                 service_id=service_id,
+                text="Please tell me one service and one clear date so I can check the recorded fixture.",
             )
         if service_id is None:
             if (
@@ -330,16 +352,29 @@ class AvailabilityConversationService:
                     session_id=session_id,
                     requested_date=parsed_date.value,
                 )
+            if parsed_date.value is not None:
+                _save_pending_date_context(
+                    db,
+                    session_id=session_key,
+                    requested_date=parsed_date.value,
+                )
             return _response(
                 AvailabilityStatus.NEEDS_CONTEXT,
                 "request_requires_a_service",
                 session_id=session_id,
-                requested_date=parsed_date.value,
+                requested_date=requested_date,
+                text=(
+                    f"Which service would you like to check for "
+                    f"{parsed_date.value.isoformat()}? Please tell me one "
+                    "service and one clear date so I can check the recorded fixture."
+                    if parsed_date.value is not None
+                    else None
+                ),
             )
 
         result = self.availability.lookup(
             service_id=service_id,
-            requested_date=parsed_date.value,
+            requested_date=requested_date,
         )
         if result.status in {
             AvailabilityStatus.AVAILABLE,
@@ -349,8 +384,11 @@ class AvailabilityConversationService:
                 db,
                 session_id=session_key,
                 service_id=service_id,
-                requested_date=parsed_date.value,
+                requested_date=requested_date,
             )
+            if pending_date_context is not None:
+                db.delete(pending_date_context)
+                db.commit()
         return _response_from_result(result, session_id)
 
 
@@ -544,6 +582,26 @@ def _save_context(
         db.add(context)
     else:
         context.service_id = service_id
+        context.requested_date = requested_date
+        context.updated_at = utc_now()
+    db.commit()
+
+
+def _save_pending_date_context(
+    db: Session,
+    *,
+    session_id: str,
+    requested_date: date,
+) -> None:
+    context = db.get(PendingAvailabilityDateContext, session_id)
+    if context is None:
+        context = PendingAvailabilityDateContext(
+            session_id=session_id,
+            requested_date=requested_date,
+            updated_at=utc_now(),
+        )
+        db.add(context)
+    else:
         context.requested_date = requested_date
         context.updated_at = utc_now()
     db.commit()

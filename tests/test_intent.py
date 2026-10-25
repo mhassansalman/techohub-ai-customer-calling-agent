@@ -512,6 +512,89 @@ def test_rule_classification_preserves_compound_hours_and_availability() -> None
     assert result.entities.requested_date == "saturday"
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Are you open on Sunday? How much is one haircut?",
+        "How much is one haircut? Are you open on Sunday?",
+    ],
+)
+def test_rules_classify_compound_hours_and_service_information(text: str) -> None:
+    result = classify_with_rules(text)
+
+    assert result.status is ClassificationStatus.CLASSIFIED
+    assert result.intents == (
+        Intent.FAQ_BUSINESS_HOURS,
+        Intent.FAQ_SERVICE_POLICY,
+    )
+    assert result.entities.service_id == "haircut"
+    assert result.entities.requested_date == "sunday"
+
+
+@pytest.mark.asyncio
+async def test_clear_compound_faq_uses_rules_without_groq() -> None:
+    class CountingUnavailableGroq:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def classify(self, text: str) -> ModelClassificationPayload:
+            self.calls += 1
+            raise ClassifierProviderError(ProviderErrorCode.TIMEOUT)
+
+    groq = CountingUnavailableGroq()
+    result = await RuleFirstIntentClassifier(groq).classify(
+        "Are you open on Sunday? How much is one haircut?"
+    )
+
+    assert groq.calls == 0
+    assert result.status is ClassificationStatus.CLASSIFIED
+    assert result.source is ClassifierSource.RULES
+    assert result.intents == (
+        Intent.FAQ_BUSINESS_HOURS,
+        Intent.FAQ_SERVICE_POLICY,
+    )
+
+
+@pytest.mark.asyncio
+async def test_hours_and_availability_compound_keeps_single_groq_fallback() -> None:
+    class CountingUnavailableGroq:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def classify(self, text: str) -> ModelClassificationPayload:
+            self.calls += 1
+            raise ClassifierProviderError(ProviderErrorCode.TIMEOUT)
+
+    groq = CountingUnavailableGroq()
+    result = await RuleFirstIntentClassifier(groq).classify(
+        "Are you open Saturday, and do you have a haircut appointment?"
+    )
+
+    assert groq.calls == 1
+    assert result.source is ClassifierSource.RULES
+    assert result.intents == (
+        Intent.FAQ_BUSINESS_HOURS,
+        Intent.APPOINTMENT_AVAILABILITY,
+    )
+
+
+@pytest.mark.asyncio
+async def test_slots_without_a_service_use_availability_rules_without_groq() -> None:
+    class NoCall:
+        async def classify(self, text: str) -> ModelClassificationPayload:
+            raise AssertionError("Clear slot wording should not call Groq")
+
+    result = await RuleFirstIntentClassifier(NoCall()).classify(
+        "Which slots are open on Wednesday?"
+    )
+
+    assert result.status is ClassificationStatus.CLASSIFIED
+    assert result.intents == (Intent.APPOINTMENT_AVAILABILITY,)
+    assert result.entities.service_id is None
+    assert result.entities.requested_date == "wednesday"
+    assert result.source is ClassifierSource.RULES
+
+
 def test_date_correction_requires_session_context() -> None:
     without_context = classify_with_rules("Sorry, I meant Saturday.")
     with_context = classify_with_rules(

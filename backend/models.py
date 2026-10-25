@@ -107,6 +107,20 @@ class AvailabilityConversationContext(Base):
     )
 
 
+class PendingAvailabilityDateContext(Base):
+    __tablename__ = "pending_availability_date_contexts"
+    __table_args__ = (
+        Index("ix_pending_availability_context_updated_at", "updated_at"),
+    )
+
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("conversation_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    requested_date: Mapped[date] = mapped_column(Date, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
 class Message(Base):
     __tablename__ = "messages"
     __table_args__ = (

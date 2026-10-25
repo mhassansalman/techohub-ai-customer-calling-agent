@@ -23,7 +23,10 @@ from backend.intent import (
     ProviderErrorCode,
 )
 from backend.knowledge import AnswerStatus, KnowledgeAnswer, KnowledgeService
-from backend.models import AvailabilityConversationContext
+from backend.models import (
+    AvailabilityConversationContext,
+    PendingAvailabilityDateContext,
+)
 
 
 class CapabilityResult(BaseModel):
@@ -83,7 +86,11 @@ class ConversationWorkflow:
     ) -> ConversationWorkflowResult:
         try:
             context = db.get(AvailabilityConversationContext, str(session_id))
-            has_pending_context = context is not None
+            pending_date = db.get(
+                PendingAvailabilityDateContext,
+                str(session_id),
+            )
+            has_pending_context = context is not None or pending_date is not None
             if db.in_transaction():
                 db.rollback()
 
@@ -242,16 +249,21 @@ class ConversationWorkflow:
         classification = state["classification"]
         text = state["request"].message_text
         results: list[CapabilityResult] = []
-        has_hours_and_availability = {
-            Intent.FAQ_BUSINESS_HOURS,
-            Intent.APPOINTMENT_AVAILABILITY,
-        }.issubset(classification.intents)
+        has_hours_and_compound_intent = Intent.FAQ_BUSINESS_HOURS in (
+            classification.intents
+        ) and bool(
+            set(classification.intents)
+            & {
+                Intent.APPOINTMENT_AVAILABILITY,
+                Intent.FAQ_SERVICE_POLICY,
+            }
+        )
 
         for intent in classification.intents:
             if intent is Intent.FAQ_BUSINESS_HOURS:
                 query = (
                     _hours_query(classification.entities.requested_date)
-                    if has_hours_and_availability
+                    if has_hours_and_compound_intent
                     else text
                 )
                 results.append(

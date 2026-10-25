@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -28,6 +29,7 @@ from backend.models import (
     AvailabilityConversationContext,
     ConversationSession,
     Message,
+    PendingAvailabilityDateContext,
 )
 class UnavailableGroq:
     def __init__(self, code: ProviderErrorCode = ProviderErrorCode.MISSING_API_KEY):
@@ -253,6 +255,135 @@ def test_compound_hours_and_availability_returns_both_capability_results(
     assert response.status_code == 200
     assert "Saturday, 10:00–16:00 Etc/UTC" in text
     assert "10:00 Etc/UTC" in text
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Are you open on Sunday? How much is one haircut?",
+        "How much is one haircut? Are you open on Sunday?",
+    ],
+)
+def test_compound_hours_and_service_request_returns_both_grounded_answers(
+    tmp_path: Path,
+    message: str,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        response = _send(client, _start_session(client), message)
+
+    text = response.json()["assistant_message"]["text"]
+    assert response.status_code == 200
+    assert "closed on Sunday" in text
+    assert "USD 35.00" in text
+    assert "30 minutes" in text
+    assert "clarify" not in text.casefold()
+
+
+def test_haircut_price_question_uses_existing_catalog_answer(tmp_path: Path) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        response = _send(
+            client,
+            _start_session(client),
+            "How much is one haircut?",
+        )
+
+    text = response.json()["assistant_message"]["text"]
+    assert "USD 35.00" in text
+    assert "30 minutes" in text
+
+
+def test_slots_without_service_preserve_date_until_service_clarification(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        session_id = _start_session(client)
+        missing_service = _send(
+            client,
+            session_id,
+            "Which slots are open on Wednesday?",
+        )
+        with app.state.session_factory() as db:
+            pending = db.get(PendingAvailabilityDateContext, str(session_id))
+            assert pending is not None
+            assert pending.requested_date.isoformat() == "2026-11-04"
+
+        service_clarification = _send(client, session_id, "Haircut")
+        with app.state.session_factory() as db:
+            pending_after_lookup = db.get(
+                PendingAvailabilityDateContext,
+                str(session_id),
+            )
+            saved_context = db.get(
+                AvailabilityConversationContext,
+                str(session_id),
+            )
+
+    clarification_text = missing_service.json()["assistant_message"]["text"]
+    lookup_text = service_clarification.json()["assistant_message"]["text"]
+    assert "Which service" in clarification_text
+    assert "2026-11-04" in clarification_text
+    assert "no recorded fixture slots" in lookup_text
+    assert "2026-11-04" in lookup_text
+    assert pending_after_lookup is None
+    assert saved_context is not None
+    assert saved_context.service_id == "haircut"
+    assert saved_context.requested_date.isoformat() == "2026-11-04"
+
+
+def test_explicit_wednesday_haircut_slots_report_no_fixture_slots(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        response = _send(
+            client,
+            _start_session(client),
+            "Which haircut slots are open on Wednesday?",
+        )
+
+    text = response.json()["assistant_message"]["text"]
+    assert "no recorded fixture slots" in text
+    assert "2026-11-04" in text
+    assert "not confirm real-world unavailability" in text
+
+
+def test_browser_voice_and_typed_turns_keep_same_response_contract(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        session_id = client.post(
+            "/api/sessions",
+            json={"channel_type": "browser_voice"},
+        ).json()["session"]["session_id"]
+        responses = []
+        for modality, message in (
+            ("speech_transcript", "Are you open on Sunday?"),
+            ("text", "How much is one haircut?"),
+        ):
+            response = client.post(
+                f"/api/sessions/{session_id}/messages",
+                json={
+                    "session_id": session_id,
+                    "trace_id": str(uuid4()),
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "channel_type": "browser_voice",
+                    "modality": modality,
+                    "message_text": message,
+                },
+            )
+            assert response.status_code == 200
+            payload = response.json()
+            assert set(payload) == {"customer_message", "assistant_message"}
+            assert payload["customer_message"]["session_id"] == session_id
+            assert payload["assistant_message"]["session_id"] == session_id
+            responses.append(payload)
+
+    assert "closed on Sunday" in responses[0]["assistant_message"]["text"]
+    assert "USD 35.00" in responses[1]["assistant_message"]["text"]
 
 
 def test_availability_missing_date_or_service_asks_for_clarification(

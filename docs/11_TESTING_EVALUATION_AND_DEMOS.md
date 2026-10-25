@@ -69,13 +69,15 @@ T-21 is the browser voice-chat acceptance test for P14.
 - **Additional Chrome acceptance (user-observed):** The user manually verified the complete flow in regular Google Chrome: “Are you open on Sunday?” was recognized and appeared in the React conversation; the existing backend returned “Demo Salon is closed on Sunday.”; that response appeared in chat and was audibly spoken by browser TTS; the interface displayed “Voice reply finished.” The Chrome version was not provided. This is user-reported acceptance evidence, distinct from the earlier VS Code integrated-browser failure above.
 - **Result:** **Complete; T-21 passed.** The user-observed Chrome run verifies final speech transcription, transcript display, actual backend response, and audible speech of that response. The frontend test suite verifies voice and typed turns share the existing session and endpoint. The earlier P03 compatibility result remains unchanged and is not retroactively upgraded.
 
-### Separate observations for follow-up investigation
+### Routing and availability follow-up — 2026-10-25
 
-These user-observed responses are potential intent-routing/capability issues, not failures of the P14 voice transport integration. They are recorded for a focused follow-up; no backend behavior was changed during P14 finalization.
+These user-observed responses were potential intent-routing/capability issues, not failures of the P14 voice transport integration:
 
 - “Are you open on Sunday? How much is one haircut?” produced a clarification response rather than handling both intents.
 - “Which slots are open on Wednesday?” produced “I can't confirm appointment slots from the service catalog.”
-- **Disposition:** Investigate intent classification, multi-intent handling, and appointment-availability capability routing separately. Do not infer a root cause or change unrelated backend behavior as part of P14 closure.
+- **Root cause verified:** The rules classifier returned only `faq_business_hours` for both messages. The first mixed hours and service topics in one knowledge query; the second treated “slots open” as an hours FAQ. The Groq fallback was bypassed for these single-intent rule results.
+- **Correction verified:** Compound hours-plus-service questions now route through the existing multi-intent capability with separate grounded FAQ queries. Slot wording routes to availability; a missing service is clarified, and the requested date is retained for a follow-up service answer. The immutable fixture has no haircut slots for the next Wednesday, 2026-11-04, and the response reports no recorded slots rather than inventing availability.
+- **Regression coverage:** Backend tests cover both compound question orders, existing hours-plus-availability behavior, deterministic single-intent routing, missing-service date preservation, no-recorded-slot behavior, Groq call bounds, and the unchanged voice/text response contract.
 
 ## Routing/agent eval
 

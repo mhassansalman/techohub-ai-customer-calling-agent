@@ -394,7 +394,11 @@ class RuleFirstIntentClassifier:
         )
         if (
             rule_result.status is ClassificationStatus.CLASSIFIED
-            and len(rule_result.intents) == 1
+            and (
+                len(rule_result.intents) == 1
+                or rule_result.reason_code
+                == "compound_hours_and_service_information"
+            )
         ):
             return rule_result
         if rule_result.reason_code == "date_correction_without_context":
@@ -480,6 +484,22 @@ def classify_with_rules(
     hours = _is_hours_question(tokens)
     availability = _is_availability_question(tokens, service_id)
     service_info = _is_service_question(tokens, service_id)
+    if tokens & {"slot", "slots"} and not tokens & {
+        "hours",
+        "opening",
+        "closing",
+    }:
+        hours = False
+    if hours and service_info and _is_explicit_service_information_request(tokens):
+        return _rule_result(
+            Intent.FAQ_BUSINESS_HOURS,
+            Intent.FAQ_SERVICE_POLICY,
+            entities=ClassificationEntities(
+                service_id=service_id,
+                requested_date=date_entity,
+            ),
+            reason="compound_hours_and_service_information",
+        )
     if hours and availability:
         return _rule_result(
             Intent.FAQ_BUSINESS_HOURS,
@@ -493,15 +513,36 @@ def classify_with_rules(
     if availability:
         if unknown_service:
             return _clarification("unknown_service_in_availability_request")
-        if service_id is None or date_entity is None:
+        if (service_id is None or date_entity is None) and not tokens & {
+            "slot",
+            "slots",
+        }:
             return _clarification("availability_requires_service_and_date")
+        reason = "clear_availability_request"
+        if service_id is None:
+            reason = "availability_request_needs_service"
+        elif date_entity is None:
+            reason = "availability_request_needs_date"
         return _rule_result(
             Intent.APPOINTMENT_AVAILABILITY,
             entities=ClassificationEntities(
                 service_id=service_id,
                 requested_date=date_entity,
             ),
-            reason="clear_availability_request",
+            reason=reason,
+        )
+    if (
+        has_pending_availability_context
+        and service_id is not None
+        and not _is_explicit_service_information_request(tokens)
+    ):
+        return _rule_result(
+            Intent.APPOINTMENT_AVAILABILITY,
+            entities=ClassificationEntities(
+                service_id=service_id,
+                requested_date=date_entity,
+            ),
+            reason="pending_availability_service_clarification",
         )
     if hours:
         return _rule_result(
@@ -573,7 +614,30 @@ def _is_hours_question(tokens: set[str]) -> bool:
 
 def _is_availability_question(tokens: set[str], service_id: str | None) -> bool:
     markers = {"appointment", "appointments", "available", "availability", "slot", "slots"}
-    return bool(tokens & markers) and (service_id is not None or "appointment" in tokens or "appointments" in tokens)
+    return bool(tokens & markers) and (
+        service_id is not None
+        or bool(tokens & {"appointment", "appointments", "slot", "slots"})
+    )
+
+
+def _is_explicit_service_information_request(tokens: set[str]) -> bool:
+    return bool(
+        tokens
+        & {
+            "cost",
+            "duration",
+            "long",
+            "much",
+            "offer",
+            "offers",
+            "price",
+            "pricing",
+            "provide",
+            "service",
+            "services",
+            "take",
+        }
+    )
 
 
 def _is_service_question(tokens: set[str], service_id: str | None) -> bool:
@@ -642,9 +706,22 @@ def _service_mention(
         return None, True
     if ids:
         return next(iter(ids)), False
-    unknown_service_terms = bool(tokens and "hair" in tokens and any(
-        token in tokens for token in ("color", "colour", "dye", "perm", "styling")
-    ))
+    unknown_service_terms = bool(
+        tokens
+        and "hair" in tokens
+        and any(
+            token in tokens
+            for token in (
+                "color",
+                "coloring",
+                "colour",
+                "colouring",
+                "dye",
+                "perm",
+                "styling",
+            )
+        )
+    )
     return None, unknown_service_terms
 
 
