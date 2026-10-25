@@ -45,9 +45,19 @@ If PowerShell activation is restricted, run the environment directly:
 ```
 
 `requirements.in` records the direct Week 1 Python dependencies;
-`requirements.lock.txt` pins the resolved environment. Frontend package setup
-is deferred until its Week 1 UI task. Do not commit `.env` files, credentials,
-local databases, or generated recordings.
+`requirements.lock.txt` pins the resolved environment. Frontend dependencies
+are pinned in `frontend/package.json` and `frontend/package-lock.json`. Install
+them from PowerShell with:
+
+```powershell
+Push-Location frontend
+npm.cmd ci
+Pop-Location
+```
+
+The frontend entrypoint and UI behavior are intentionally deferred to P12.
+Do not commit `.env` files, credentials, local databases, or generated
+recordings.
 
 ## Documentation
 
