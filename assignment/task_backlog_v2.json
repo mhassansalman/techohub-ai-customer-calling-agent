@@ -429,11 +429,11 @@
       "hours": 3,
       "tests": "T-P1-01",
       "depends_on": "P06 P21",
-      "done": "Pending",
+      "done": "Partially implemented — chunking schema designed (backend/chunker.py, knowledge_bundle/); vector adapter deferred — no embeddings/vector DB per A01 constraints",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Partially implemented",
+      "evidence": "backend/chunker.py implements KnowledgeChunk, KnowledgeChunkIndex, chunk_record, load_approved_chunks with deterministic stable IDs and SHA-256 hashes; knowledge_bundle/ contains fixture-supported FAQ docs; tests/test_chunker.py (16 tests) covers boundaries, determinism, approved-only ingestion, malformed input, unsafe paths. Vector adapter not implemented per A01 constraints."
     },
     {
       "date": "2026-10-30",
@@ -447,11 +447,11 @@
       "hours": 3,
       "tests": "T-P1-01",
       "depends_on": "A00",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "backend/chunker.py implements deterministic approved-document loader and chunker reusing OKF validation/path-security logic from backend.knowledge; knowledge_bundle/ contains fixture-supported FAQ docs (business hours, services/pricing, recorded availability); chunks carry stable IDs ({source_id}#chunk={index}), source IDs, approved text, document metadata (document_id, version) and SHA-256 content hashes; tests/test_chunker.py (16 tests) covers chunk boundaries, deterministic output, approved-only ingestion, malformed input and unsafe paths. Full backend suite: 287 passed; Python compilation clean; git diff --check clean. No embeddings, vector DB, LangGraph integration, paid APIs, model downloads or new dependencies."
     },
     {
       "date": "2026-10-31",
@@ -465,11 +465,11 @@
       "hours": 3,
       "tests": "T-P1-01",
       "depends_on": "A00 A01",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "backend/rag.py implements RagRetriever: deterministic lexical (token-overlap) fusion over A01 KnowledgeChunkIndex; approved-chunk retrieval and evidence selection; source-ID deduplication with canonical fixture precedence; conflict detection with safe abstention; empty/error retrieval falls back to existing deterministic OKF (KnowledgeService). Explicitly NOT a semantic embedding retriever — genuine semantic retrieval requires an embedding provider (tracked under A05; not implemented). tests/test_rag.py (13 tests) covers paraphrase, fixture precedence, source provenance, empty retrieval, unsupported-policy fallback, conflicting-source abstention, price-variant normalization, and deduplication. Full backend suite: 300 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed."
     },
     {
       "date": "2026-10-31",
@@ -483,11 +483,11 @@
       "hours": 3,
       "tests": "T-P1-01",
       "depends_on": "A02",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "backend/rag.py hardened for A03: sentence-level structured fact extraction (prices, durations, hours, booking restrictions); fixture precedence resolves fixture-vs-bundle disagreements; contradiction detection only within same provenance; minimum token-overlap threshold with stopword filtering; empty/error retrieval falls back to deterministic OKF; approved-source validation guard. tests/test_rag.py (18 tests) covers fixture precedence, price/duration/booking contradictions, paraphrase recall, misleading keyword matches, unrelated queries, empty fallback, source provenance, deduplication, and grounded answers. Full backend suite: 305 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed. No embeddings, vector DB, LangGraph integration, paid APIs, model downloads or new dependencies. Semantic retrieval remains pending under A05."
     },
     {
       "date": "2026-11-01",
@@ -501,11 +501,11 @@
       "hours": 3,
       "tests": "T-P1-01",
       "depends_on": "A02 A03",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "A04 implemented: TECHOHUB_RAG_ENABLED feature flag (default OFF, invalid values raise ValueError), LangGraph FAQ integration via ConversationWorkflow.rag_retriever/rag_enabled parameters, safe fallback to deterministic OKF on retriever operational failure, conflict abstention preserved, fixture precedence maintained, source IDs/provenance propagated through CapabilityResult → ConversationWorkflowResult. tests/test_workflow.py (13 new A04 tests) and tests/test_rag.py (5 new RagConfig tests) cover flag OFF/ON, deterministic FAQ unchanged, RAG grounded answers, empty retrieval fallback, retriever operational failure, conflict abstention, fixture precedence, source ID preservation, availability and handoff unchanged. Full backend suite: 331 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed. No embeddings, vector DB, new dependencies, or LangGraph redesign. A05 semantic provider fallback remains pending."
     },
     {
       "date": "2026-11-01",
@@ -519,11 +519,11 @@
       "hours": 3,
       "tests": "T-P1-01",
       "depends_on": "A04",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "A05 implemented: backend/rag.py extended with SemanticEmbeddingProvider protocol, SentenceTransformerProvider (cached all-MiniLM-L6-v2 model, 384-dim embeddings), SemanticRetriever with cosine similarity search (0.4 threshold, top_k=5), and TECHOHUB_RAG_PROVIDER env var (lexical/semantic/auto). Safe fallback chain: semantic → lexical → OKF. Same-provenance conflict detection, fixture precedence, source provenance, and OKF fallback all preserved. tests/test_rag.py (9 semantic tests) covers model loading, exact/paraphrase queries, unrelated queries, unsupported policies, conflicts, fixture precedence, provider failure. Full backend suite: 342 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed. No FAISS/Chroma/vector DB. No CUDA. Model loads from local cache only (no runtime download). A05 acceptance criteria (T-P1-01) satisfied."
     },
     {
       "date": "2026-11-02",

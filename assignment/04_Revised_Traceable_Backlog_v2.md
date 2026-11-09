@@ -76,9 +76,9 @@ o, ok, okay), Chrome frequently emits interim hypotheses (isFinal: false) and im
 
 | Original IDs | Feature / deliverable | V2 decision | Acceptance / tests | Initial status |
 |---|---|---|---|---|
-| A00–A01 | Approved RAG corpus/index and small vector adapter | Mandatory P1-S | Approved-only chunks, repeatable lightweight index, source identity | Pending |
-| A02–A03 | OKF+RAG fusion, deduplication, abstention/conflict/fallback | Mandatory P1-S | Empty RAG→OKF, conflicting sources→safe abstain, paraphrase tests | Pending |
-| A04–A05 | RAG feature flag, evidence view/metrics, stabilize | Mandatory P1-S | Known-provenance answer; existing OKF direct path remains working | Pending |
+| A00–A01 | Approved RAG corpus/index and small vector adapter | Mandatory P1-S | Approved-only chunks, repeatable lightweight index, source identity | A01 implemented (chunker + knowledge_bundle, 16 tests); A00 vector adapter deferred — no embeddings/vector DB per A01 constraints |
+| A02–A03 | OKF+RAG fusion, deduplication, abstention/conflict/fallback | Mandatory P1-S | Empty RAG→OKF, conflicting sources→safe abstain, paraphrase tests | A02 implemented (backend/rag.py + tests/test_rag.py, 13 tests); A03 implemented (backend/rag.py hardening + 5 new tests); lexical fusion over A01 chunks — semantic embedding provider pending under A05 |
+| A04–A05 | RAG feature flag, evidence view/metrics, stabilize | Mandatory P1-S | Known-provenance answer; existing OKF direct path remains working | A04 implemented (TECHOHUB_RAG_ENABLED flag, LangGraph FAQ integration, safe fallback, retrieval_reason diagnostics); A05 implemented (semantic embeddings via cached all-MiniLM-L6-v2 model, cosine similarity, safe fallback to lexical→OKF) |
 | A06–A07 | Urdu STT and Urdu→English normalization | **Deferred — out of active V2 scope** | No Urdu STT/normalization acceptance gate in active V2 | Deferred |
 | A08–A09 | English→Urdu response translation and Urdu TTS | **Deferred — out of active V2 scope** | No Urdu translation/TTS acceptance gate in active V2 | Deferred |
 | A10–A11 | Bounded complexity routing and specialized agents | Selected mandatory P1-S (minimal) | Reuse FAQ/availability/support domain tools; no duplicated writes; simple fast path | Pending |

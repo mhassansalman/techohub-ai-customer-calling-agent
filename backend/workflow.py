@@ -25,6 +25,7 @@ from backend.intent import (
     ProviderErrorCode,
 )
 from backend.knowledge import AnswerStatus, KnowledgeAnswer, KnowledgeService
+from backend.rag import RagConfig, RagRetriever, SemanticRetriever
 from backend.models import (
     AvailabilityConversationContext,
     Message,
@@ -53,6 +54,7 @@ class CapabilityResult(BaseModel):
     text: str = Field(min_length=1)
     source_ids: tuple[str, ...] = ()
     outcome: Literal["answered", "clarification", "handoff_unavailable", "unsupported"]
+    retrieval_reason: tuple[str, ...] = ()
 
 
 class ConversationWorkflowResult(BaseModel):
@@ -63,6 +65,7 @@ class ConversationWorkflowResult(BaseModel):
     classification_source: ClassifierSource
     source_ids: tuple[str, ...] = ()
     outcome: Literal["answered", "clarification", "handoff_unavailable", "unsupported"]
+    retrieval_reason: tuple[str, ...] = ()
 
 
 class WorkflowExecutionError(RuntimeError):
@@ -88,10 +91,20 @@ class ConversationWorkflow:
         classifier: IntentClassifier,
         knowledge: KnowledgeService | None = None,
         availability: AvailabilityConversationService | None = None,
+        rag_retriever: RagRetriever | None = None,
+        lexical_retriever: RagRetriever | None = None,
+        semantic_retriever: SemanticRetriever | None = None,
+        rag_enabled: bool = False,
+        rag_provider: str = "lexical",
     ) -> None:
         self.classifier = classifier
         self.knowledge = knowledge or KnowledgeService()
         self.availability = availability or AvailabilityConversationService()
+        self._rag_retriever = rag_retriever
+        self._lexical_retriever = lexical_retriever
+        self._semantic_retriever = semantic_retriever
+        self._rag_enabled = rag_enabled
+        self._rag_provider = rag_provider
         self.graph = self._build_graph()
 
     async def run(
@@ -302,7 +315,23 @@ class ConversationWorkflow:
     ) -> dict[str, tuple[CapabilityResult, ...]]:
         classification = state["classification"]
         intent = classification.intents[0]
-        answer = self.knowledge.answer(state["request"].message_text)
+        text = state["request"].message_text
+        if self._rag_enabled:
+            if self._rag_provider == "semantic" and self._semantic_retriever is not None:
+                try:
+                    answer = self._semantic_retriever.answer(text)
+                except Exception:
+                    # Semantic provider failed; fall back to lexical retriever.
+                    if self._lexical_retriever is not None:
+                        answer = self._lexical_retriever.answer(text)
+                    else:
+                        answer = self.knowledge.answer(text)
+            elif self._lexical_retriever is not None:
+                answer = self._lexical_retriever.answer(text)
+            else:
+                answer = self.knowledge.answer(text)
+        else:
+            answer = self.knowledge.answer(text)
         return {
             "capability_results": (
                 _knowledge_result(intent, answer),
@@ -507,6 +536,14 @@ class ConversationWorkflow:
                     )
                 ),
                 outcome=outcome,
+                retrieval_reason=tuple(
+                    dict.fromkeys(
+                        result.retrieval_reason[0]
+                        for result in results
+                        if result.retrieval_reason
+                    )
+                )
+                or (),
             )
         }
 
@@ -533,6 +570,7 @@ def _knowledge_result(
             if answer.status is AnswerStatus.ANSWERED
             else "unsupported"
         ),
+        retrieval_reason=(answer.reason,) if answer.reason else (),
     )
 
 
