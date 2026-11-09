@@ -30,27 +30,40 @@ async function request(path, options = {}) {
   return response.json();
 }
 
-export function createSession() {
+export function createSession(channelType = "text_web") {
   return request("/sessions", {
     method: "POST",
-    body: JSON.stringify({ channel_type: "text_web" }),
+    body: JSON.stringify({ channel_type: channelType }),
   });
+}
+
+export function getServices() {
+  return request("/services");
 }
 
 export function getSessionStatus(sessionId) {
   return request(`/sessions/${encodeURIComponent(sessionId)}`);
 }
 
-export function sendMessage({ sessionId, text }) {
+export function sendMessage({
+  sessionId,
+  channelType = "text_web",
+  text,
+  modality = "text",
+  language,
+  asrConfidence,
+}) {
   return request(`/sessions/${encodeURIComponent(sessionId)}/messages`, {
     method: "POST",
     body: JSON.stringify({
       session_id: sessionId,
       trace_id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
-      channel_type: "text_web",
-      modality: "text",
+      channel_type: channelType,
+      modality,
       message_text: text,
+      ...(language ? { language } : {}),
+      ...(asrConfidence !== undefined ? { asr_confidence: asrConfidence } : {}),
     }),
   });
 }

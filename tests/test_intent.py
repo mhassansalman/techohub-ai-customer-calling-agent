@@ -725,9 +725,12 @@ def test_date_correction_requires_session_context() -> None:
 
 def test_unknown_or_ambiguous_messages_clarify_without_guessing() -> None:
     assert classify_with_rules("Tell me something.").status is ClassificationStatus.CLARIFICATION
+    unknown_service = classify_with_rules("Do you offer hair coloring?")
+    assert unknown_service.status is ClassificationStatus.CLARIFICATION
+    assert unknown_service.reason_code == "unknown_service"
     assert classify_with_rules(
         "Do you have a hair coloring appointment Friday?"
-    ).status is ClassificationStatus.CLARIFICATION
+    ).reason_code == "unknown_service_in_availability_request"
     assert classify_with_rules("Are you open Saturday or Sunday?").status is ClassificationStatus.CLARIFICATION
 
 

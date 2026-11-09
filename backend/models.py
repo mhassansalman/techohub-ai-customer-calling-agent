@@ -150,6 +150,37 @@ class Message(Base):
     session: Mapped[ConversationSession] = relationship(back_populates="messages")
 
 
+class HandoffTicket(Base):
+    __tablename__ = "handoff_tickets"
+    __table_args__ = (
+        UniqueConstraint(
+            "originating_message_id",
+            name="uq_handoff_ticket_originating_message",
+        ),
+        CheckConstraint(
+            "status = 'queued'",
+            name="ck_handoff_ticket_status_queued",
+        ),
+        Index("ix_handoff_tickets_session_created_at", "session_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("conversation_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    originating_message_id: Mapped[str] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="queued"
+    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
     __table_args__ = (

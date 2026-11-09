@@ -561,6 +561,8 @@ def classify_with_rules(
             ),
             reason=reason,
         )
+    if unknown_service and _is_explicit_service_information_request(tokens):
+        return _clarification("unknown_service")
     if (
         has_pending_availability_context
         and service_id is not None

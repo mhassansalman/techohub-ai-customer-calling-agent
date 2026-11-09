@@ -85,24 +85,24 @@ def test_pinned_clock_resolves_relative_days_in_utc(
 @pytest.mark.parametrize(
     ("query", "service_name", "price", "duration"),
     [
-        ("How much is a haircut and how long does it take?", "Haircut", "USD 35.00", "30"),
-        ("What is the price and duration of a beard trim?", "Beard trim", "USD 18.00", "20"),
+        ("How much is a haircut and how long does it take?", "haircut", "$35", "30"),
+        ("What is the price and duration of a beard trim?", "beard trim", "$18", "20"),
         (
             "How much does a haircut and beard trim cost and how long is it?",
-            "Haircut and beard trim",
-            "USD 45.00",
+            "haircut and beard trim",
+            "$45",
             "45",
         ),
         (
             "How much is beard trimming?",
-            "Beard trim",
-            "USD 18.00",
+            "beard trim",
+            "$18",
             "20",
         ),
         (
             "How much is the haircut and beard combo?",
-            "Haircut and beard trim",
-            "USD 45.00",
+            "haircut and beard trim",
+            "$45",
             "45",
         ),
     ],
@@ -117,7 +117,7 @@ def test_service_price_and_duration_are_fixture_grounded(
     answer = knowledge.answer(query)
 
     assert answer.status is AnswerStatus.ANSWERED
-    assert service_name in answer.text
+    assert service_name in answer.text.casefold()
     assert price in answer.text
     assert f"{duration} minutes" in answer.text
     assert len(answer.source_ids) == 1
@@ -131,8 +131,9 @@ def test_service_catalog_answer_does_not_claim_live_slots(
     answer = knowledge.answer("Do you offer a haircut?")
 
     assert answer.status is AnswerStatus.ANSWERED
-    assert "offered in the Demo Salon service catalog" in answer.text
-    assert "does not confirm appointment-slot availability" in answer.text
+    assert answer.text == "A haircut costs $35 and takes about 30 minutes."
+    assert "catalog" not in answer.text.casefold()
+    assert "availability" not in answer.text.casefold()
 
 
 def test_general_service_catalog_is_grounded(
@@ -145,6 +146,9 @@ def test_general_service_catalog_is_grounded(
         name in answer.text
         for name in ("Haircut", "Beard trim", "Haircut and beard trim")
     )
+    assert all(price in answer.text for price in ("$35", "$18", "$45"))
+    assert all(duration in answer.text for duration in ("30 minutes", "20 minutes", "45 minutes"))
+    assert "coloring" not in answer.text.casefold()
     assert len(answer.source_ids) == 3
 
 
@@ -157,7 +161,10 @@ def test_unknown_service_is_not_presented_as_unavailable(
     assert result.status is RetrievalStatus.UNSUPPORTED
     assert result.reason == "unknown_service"
     assert answer.status is AnswerStatus.ABSTAINED
-    assert "can't confirm whether it's offered" in answer.text
+    assert answer.text == (
+        "Sorry, I don't have approved details for that service, so I can't "
+        "confirm whether we offer it."
+    )
     assert answer.source_ids == ()
 
 
@@ -213,7 +220,10 @@ def test_appointment_slots_are_not_answered_from_static_knowledge(
 
     assert answer.status is AnswerStatus.ABSTAINED
     assert answer.reason == "appointment_slots_require_booking_provider"
-    assert "can't confirm appointment slots" in answer.text
+    assert answer.text == (
+        "I can check recorded appointment slots if you tell me a service and date."
+    )
+    assert "can't check" not in answer.text.casefold()
 
 
 def test_matcher_uses_token_boundaries_not_substrings(

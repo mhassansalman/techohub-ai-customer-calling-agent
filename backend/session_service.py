@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from backend.channels import CustomerRequest, InputModality
@@ -10,6 +11,7 @@ from backend.database import utc_now
 from backend.models import (
     AuditEvent,
     ConversationSession,
+    HandoffTicket,
     Message,
     MessageRole,
     SessionOutcome,
@@ -17,8 +19,9 @@ from backend.models import (
 )
 
 ASSISTANT_DISCLOSURE = (
-    "I am an automated assistant. Text messages in this demo are stored "
-    "to support the conversation."
+    "I am an automated assistant. Typed messages and recognized speech "
+    "transcripts are stored to support the conversation. Microphone audio "
+    "is not stored."
 )
 INTERIM_RESPONSE = (
     "Your message was recorded. Automated response generation is not "
@@ -281,6 +284,74 @@ def persist_assistant_message(
     db.commit()
     db.refresh(assistant_message)
     return assistant_message
+
+
+def create_handoff_ticket(
+    db: Session,
+    *,
+    session_id: UUID,
+    originating_message_id: str,
+    trace_id: UUID,
+) -> HandoffTicket:
+    conversation = get_session(db, session_id)
+    if conversation.status != SessionStatus.ACTIVE.value:
+        raise SessionClosedError(str(session_id))
+
+    originating_message = db.get(Message, originating_message_id)
+    if (
+        originating_message is None
+        or originating_message.session_id != str(session_id)
+        or originating_message.role != MessageRole.CUSTOMER.value
+    ):
+        raise ValueError("handoff request must be a customer message in this session")
+
+    existing = db.scalar(
+        select(HandoffTicket).where(
+            HandoffTicket.originating_message_id == originating_message_id
+        )
+    )
+    if existing is not None:
+        return existing
+
+    ticket = HandoffTicket(
+        id=str(uuid4()),
+        session_id=str(session_id),
+        originating_message_id=originating_message_id,
+        status="queued",
+        created_at=utc_now(),
+    )
+    db.add_all(
+        [
+            ticket,
+            _audit(
+                session_id=str(session_id),
+                trace_id=str(trace_id),
+                actor="system",
+                action="handoff_ticket.queued",
+                resource_type="handoff_ticket",
+                resource_id=ticket.id,
+                outcome="success",
+            ),
+        ]
+    )
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.scalar(
+            select(HandoffTicket).where(
+                HandoffTicket.originating_message_id == originating_message_id
+            )
+        )
+        if existing is None:
+            raise
+        return existing
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(ticket)
+    return ticket
 
 
 def _validate_message_session(

@@ -11,9 +11,10 @@ lifecycle endpoints and an internal deterministic knowledge service.
 - **P1 (optional):** pursue enhancements only after P0 priorities and approvals.
 - **P2 (excluded):** do not implement excluded-scope features.
 
-The Week 1 task IDs, dependencies, and linked acceptance evidence are in
-[the traceable backlog](assignment/02_Traceable_Backlog_and_Daily_Schedule.md)
-and [the machine-readable task backlog](assignment/task_backlog.json).
+The active scope and task tracking are in the
+[V2 development plan](assignment/03_Revised_Development_Plan_v2.md),
+[V2 traceable backlog](assignment/04_Revised_Traceable_Backlog_v2.md), and
+[V2 machine-readable task backlog](assignment/task_backlog_v2.json).
 
 ## Local setup
 
@@ -56,8 +57,10 @@ Pop-Location
 ```
 
 The P12 browser text chat is a client of the session lifecycle API. P13 routes
-messages through grounded FAQ and read-only availability capabilities; booking
-writes, ticket creation, CRM access, and live staff transfer remain
+messages through grounded FAQ and read-only availability capabilities. Customers
+can explicitly confirm a queued support ticket, persisted with the conversation;
+protected staff endpoints provide read-only ticket list and detail access. Booking
+writes, CRM access, and real staff transfer or outbound telephony remain
 unimplemented. The compatibility page below remains a separate P03 spike.
 Do not commit `.env` files, credentials, local databases, or generated
 recordings.
@@ -138,9 +141,10 @@ with Pydantic; classification does not answer requests, invoke tools, or
 execute business actions. `backend.workflow.ConversationWorkflow` is the
 LangGraph router used by the session message endpoint. It combines the
 classifier with grounded FAQ and read-only fixture availability capabilities.
-Booking writes, customer-account access, ticket creation, and live staff
-handoff are not implemented; the workflow reports those limitations rather
-than claiming those actions succeeded.
+Booking writes, customer-account access, and live staff transfer are not
+implemented; the workflow reports those limitations rather than claiming
+those actions succeeded. Customers can explicitly confirm a queued support
+ticket, which is persisted with the conversation.
 
 Groq configuration is optional for local rules and tests. To enable model
 classification, set `GROQ_API_KEY` in the ignored local `.env` file or process
@@ -149,6 +153,24 @@ environment. `GROQ_MODEL` defaults to `openai/gpt-oss-20b`;
 `GROQ_BACKOFF_SECONDS` can tune the bounded retry policy (at most one retry,
 five seconds per attempt, and eight seconds total). Never commit `.env` or
 include the key in logs or command-line arguments.
+
+## Protected staff ticket API
+
+Set `STAFF_API_KEY` in the backend process environment. Keep this secret on the
+server; never expose it to the React frontend or commit it. Staff endpoints
+fail closed if the variable is missing or empty.
+
+- `GET /api/staff/tickets?limit=50` lists queued tickets (maximum 100).
+- `GET /api/staff/tickets/{ticket_id}` retrieves one ticket.
+
+Send the key in the `X-Staff-API-Key` header. For example, in PowerShell after
+setting the environment variable:
+
+```powershell
+Invoke-RestMethod `
+  -Uri "http://127.0.0.1:8000/api/staff/tickets?limit=50" `
+  -Headers @{ "X-Staff-API-Key" = $env:STAFF_API_KEY }
+```
 
 ## P03 Chrome voice compatibility check
 
@@ -176,4 +198,4 @@ and does not call this application’s backend.
 - [Tech stack and local deployment](docs/10_TECH_STACK_DEPLOYMENT_AND_CONFIG.md)
 - [Architecture decisions and open questions](docs/12_ARCHITECTURE_DECISIONS_AND_OPEN_QUESTIONS.md)
 - [Implementation dependency order](docs/13_IMPLEMENTATION_SEQUENCE_AND_DEPENDENCIES.md)
-- [Week 1 traceable backlog](assignment/02_Traceable_Backlog_and_Daily_Schedule.md)
+- [Active V2 traceable backlog](assignment/04_Revised_Traceable_Backlog_v2.md)

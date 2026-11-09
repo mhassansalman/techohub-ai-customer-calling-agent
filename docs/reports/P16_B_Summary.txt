@@ -1,0 +1,23 @@
+P16-B VERIFICATION SUMMARY
+==========================
+
+ADDED TESTS (5) in frontend/src/App.test.jsx:
+----------------------
+1. automatically listens after Start Call in Live Call Mode
+2. one transcript submitted per recognition cycle in live call mode
+3. microphone restarts after TTS completion in live call mode
+4. no microphone restart after End Call in live call mode
+5. safe behavior when TTS fails or is unavailable in live call mode
+
+BUILD: PASS
+- vite build succeeds, dist/ generated
+
+TESTS: BLOCKED
+- Pre-existing mockApi fetch mock issue in jsdom environment
+- Error: "TypeError: Cannot read properties of undefined (reading 'options')"
+- Affects all 29 tests (24 original + 5 new)
+- mockVoice and emitRecognitionResult helpers work correctly
+
+NEXT STEPS:
+- Fix mockApi() to properly stub global fetch for jsdom
+- Re-run npm run test to verify all tests pass

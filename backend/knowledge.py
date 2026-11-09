@@ -700,13 +700,12 @@ def _compose_service_answer(
 ) -> KnowledgeAnswer:
     name = record.fact("name")
     if record.fact("active") != "true":
-        text = f"{name} is not listed as an active service in the approved catalog."
+        text = f"Sorry, {name.lower()} isn't currently offered."
     else:
+        service_name = name[0].lower() + name[1:]
         text = (
-            f"{name} is offered in the Demo Salon service catalog. "
-            f"It costs {record.fact('currency')} {record.fact('price_amount')} "
-            f"and takes {record.fact('duration_minutes')} minutes. "
-            "Catalog listing does not confirm appointment-slot availability."
+            f"A {service_name} costs {_format_service_price(record)} and takes "
+            f"about {record.fact('duration_minutes')} minutes."
         )
     return KnowledgeAnswer(
         text=text,
@@ -730,13 +729,25 @@ def _compose_service_list(
             status=AnswerStatus.ABSTAINED,
             reason="no_active_services",
         )
-    service_names = ", ".join(record.fact("name") or "" for record in active_services)
+    services = ", ".join(
+        f"{record.fact('name')} ({_format_service_price(record)}, about "
+        f"{record.fact('duration_minutes')} minutes)"
+        for record in active_services
+    )
     return KnowledgeAnswer(
-        text=f"Services listed in the approved Demo Salon catalog: {service_names}.",
+        text=f"We offer {services}.",
         status=AnswerStatus.ANSWERED,
         reason="service_catalog_list",
         source_ids=tuple(record.source_id for record in active_services),
     )
+
+
+def _format_service_price(record: KnowledgeRecord) -> str:
+    amount = record.fact("price_amount") or ""
+    if "." in amount:
+        amount = amount.rstrip("0").rstrip(".")
+    currency = record.fact("currency")
+    return f"${amount}" if currency == "USD" else f"{currency} {amount}"
 
 
 def _abstention_text(reason: str) -> str:
@@ -744,11 +755,11 @@ def _abstention_text(reason: str) -> str:
         return "I don't have approved information to confirm that policy."
     if reason == "unknown_service":
         return (
-            "I don't have approved information about that service, so I can't "
-            "confirm whether it's offered or quote its price or duration."
+            "Sorry, I don't have approved details for that service, so I can't "
+            "confirm whether we offer it."
         )
     if reason == "appointment_slots_require_booking_provider":
-        return "I can't confirm appointment slots from the service catalog."
+        return "I can check recorded appointment slots if you tell me a service and date."
     if reason in {
         "hours_and_service_topics",
         "multiple_or_conflicting_days",

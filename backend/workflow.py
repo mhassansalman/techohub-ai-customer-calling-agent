@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import date
+import re
 from typing import Literal, TypedDict
 from uuid import UUID
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.availability import (
@@ -25,7 +27,22 @@ from backend.intent import (
 from backend.knowledge import AnswerStatus, KnowledgeAnswer, KnowledgeService
 from backend.models import (
     AvailabilityConversationContext,
+    Message,
+    MessageRole,
     PendingAvailabilityDateContext,
+)
+from backend.session_service import create_handoff_ticket
+
+
+HANDOFF_CONFIRMATION_PROMPT = (
+    "Would you like me to create a queued support ticket for staff to follow up? "
+    "Please reply yes or no."
+)
+HANDOFF_CLARIFICATION_PROMPT = (
+    "Please say yes or no, or use the confirmation buttons."
+)
+HANDOFF_CONFLICT_PROMPT = (
+    "I heard both yes and no. Would you like me to create a support ticket?"
 )
 
 
@@ -85,6 +102,60 @@ class ConversationWorkflow:
         db: Session,
     ) -> ConversationWorkflowResult:
         try:
+            pending_handoff = self._pending_handoff_confirmation(
+                session_id=session_id,
+                request=request,
+                db=db,
+            )
+            if db.in_transaction():
+                db.rollback()
+
+            if pending_handoff is not None:
+                decision, originating_message_id = pending_handoff
+                if decision == "confirm":
+                    ticket = create_handoff_ticket(
+                        db,
+                        session_id=session_id,
+                        originating_message_id=originating_message_id,
+                        trace_id=request.trace_id,
+                    )
+                    return ConversationWorkflowResult(
+                        response_text=(
+                            "Your support ticket has been queued. "
+                            f"Your ticket ID is {ticket.id}."
+                        ),
+                        intents=(Intent.HUMAN_REQUEST,),
+                        classification_source=ClassifierSource.RULES,
+                        outcome="answered",
+                    )
+                if decision == "reject":
+                    return ConversationWorkflowResult(
+                        response_text=(
+                            "Understood. I won't create a support ticket."
+                        ),
+                        intents=(Intent.HUMAN_REQUEST,),
+                        classification_source=ClassifierSource.RULES,
+                        outcome="answered",
+                    )
+                if decision in {"clarify", "conflict", None}:
+                    return ConversationWorkflowResult(
+                        response_text=(
+                            HANDOFF_CONFLICT_PROMPT
+                            if decision == "conflict"
+                            else HANDOFF_CLARIFICATION_PROMPT
+                        ),
+                        intents=(Intent.HUMAN_REQUEST,),
+                        classification_source=ClassifierSource.RULES,
+                        outcome="clarification",
+                    )
+
+            if _is_short_acknowledgment(request.message_text):
+                return ConversationWorkflowResult(
+                    response_text="Thanks. What can I help you with?",
+                    classification_source=ClassifierSource.RULES,
+                    outcome="answered",
+                )
+
             context = db.get(AvailabilityConversationContext, str(session_id))
             pending_date = db.get(
                 PendingAvailabilityDateContext,
@@ -105,6 +176,47 @@ class ConversationWorkflow:
         except Exception as error:
             raise WorkflowExecutionError("conversation workflow failed") from error
         return ConversationWorkflowResult.model_validate(state["response"])
+
+    @staticmethod
+    def _pending_handoff_confirmation(
+        *,
+        session_id: UUID,
+        request: CustomerRequest,
+        db: Session,
+    ) -> tuple[str | None, str] | None:
+        messages = list(
+            db.scalars(
+                select(Message)
+                .where(Message.session_id == str(session_id))
+                .order_by(Message.sequence)
+            )
+        )
+        if (
+            not messages
+            or messages[-1].role != MessageRole.CUSTOMER.value
+            or messages[-1].text != request.message_text
+        ):
+            return None
+
+        decision = _handoff_confirmation_decision(request.message_text)
+        index = len(messages) - 2
+        while index >= 1:
+            assistant_message = messages[index]
+            originating_message = messages[index - 1]
+            if (
+                assistant_message.role != MessageRole.ASSISTANT.value
+                or not (
+                    assistant_message.text == HANDOFF_CLARIFICATION_PROMPT
+                    or assistant_message.text == HANDOFF_CONFLICT_PROMPT
+                    or HANDOFF_CONFIRMATION_PROMPT in assistant_message.text
+                )
+                or originating_message.role != MessageRole.CUSTOMER.value
+            ):
+                return None
+            if HANDOFF_CONFIRMATION_PROMPT in assistant_message.text:
+                return decision, originating_message.id
+            index -= 2
+        return None
 
     def _build_graph(self):
         builder = StateGraph(ConversationState)
@@ -326,6 +438,16 @@ class ConversationWorkflow:
                 "Please tell me one service and one clear date so I can check "
                 "recorded availability."
             )
+        elif classification.reason_code == "unknown_service":
+            text = (
+                "Sorry, I don't have approved details for that service, so I "
+                "can't confirm whether we offer it."
+            )
+        elif classification.reason_code == "unknown_service_in_availability_request":
+            text = (
+                "Sorry, I can't verify that service in our approved catalog, "
+                "so I can't check its recorded availability."
+            )
         elif classification.reason_code == "service_interest_needs_intent":
             text = (
                 "Are you looking for information about that service, or would "
@@ -414,6 +536,73 @@ def _knowledge_result(
     )
 
 
+def _handoff_confirmation_decision(text: str) -> str | None:
+    normalized = re.sub(
+        r"\s+",
+        " ",
+        re.sub(r"[^\w']+", " ", text.casefold().replace("’", "'")).strip(),
+    )
+    tokens = normalized.split()
+    affirmative_phrases = {
+        "yes please",
+        "yeah please",
+        "sure please",
+        "please do",
+        "go ahead",
+        "please create it",
+        "create the ticket",
+        "i confirm",
+    }
+    negative_phrases = {
+        "no thanks",
+        "no thank you",
+        "no please",
+        "not now",
+        "don't create it",
+        "do not create it",
+        "cancel",
+    }
+    if normalized in affirmative_phrases:
+        return "confirm"
+    if normalized in negative_phrases:
+        return "reject"
+
+    affirmative_tokens = {
+        "yes",
+        "yeah",
+        "yep",
+        "yup",
+        "sure",
+        "certainly",
+        "absolutely",
+        "okay",
+        "ok",
+    }
+    negative_tokens = {"no", "nope", "nah"}
+    repeated_tokens = tokens[:-1] if tokens and tokens[-1] == "please" else tokens
+    if repeated_tokens and all(token in affirmative_tokens for token in repeated_tokens):
+        return "confirm"
+    if tokens and all(token in negative_tokens for token in tokens):
+        return "reject"
+    if tokens and all(
+        token in affirmative_tokens | negative_tokens for token in tokens
+    ):
+        return "conflict"
+
+    uncertainty_tokens = {"maybe", "hmm", "unsure", "uncertain"}
+    if (
+        set(tokens) & (affirmative_tokens | negative_tokens | uncertainty_tokens)
+        or ("not" in tokens and "sure" in tokens)
+        or ({"don't", "dont"} & set(tokens) and "know" in tokens)
+    ):
+        return "clarify"
+    return None
+
+
+def _is_short_acknowledgment(text: str) -> bool:
+    return _handoff_confirmation_decision(text) in {"confirm", "reject"}
+
+
 def _support_result(
     intent: Intent,
     text: str,
@@ -435,13 +624,11 @@ def _support_result(
 
     messages = {
         Intent.HUMAN_REQUEST: (
-            "I can't transfer this chat or notify a staff member from this "
-            "demo. Please contact salon staff directly through a contact "
-            "method you already have."
+            HANDOFF_CONFIRMATION_PROMPT
         ),
         Intent.APPOINTMENT_CREATE: (
-            "I can check recorded fixture availability, but appointment "
-            "booking is not available here. No appointment was created."
+            "I can check the recorded slots, but I can't book an appointment "
+            "in this demo."
         ),
         Intent.APPOINTMENT_MODIFY: (
             "I can't access or change existing appointments in this demo. "

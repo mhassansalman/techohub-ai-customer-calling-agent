@@ -36,6 +36,24 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 
+# Generated test and build output
+/test_output*.txt
+/test-output*.txt
+/run_test.txt
+/test_run.txt
+/test_result.txt
+/single_test.txt
+/build_output.txt
+/frontend/test_output*.txt
+/frontend/test-output*.txt
+/frontend/vitest_output*.txt
+/frontend/vt_test_result*.txt
+/frontend/run_test.txt
+/frontend/test_run.txt
+/frontend/test_result.txt
+/frontend/single_test.txt
+/frontend/build_output.txt
+
 # Editors and operating systems
 .vscode/
 .idea/

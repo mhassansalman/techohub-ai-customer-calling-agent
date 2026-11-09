@@ -11,6 +11,7 @@ from backend.fixtures import CANONICAL_FIXTURE_PATH
 from backend.models import (
     AuditEvent,
     ConversationSession,
+    HandoffTicket,
     Message,
     MessageRole,
     SessionOutcome,
@@ -22,6 +23,7 @@ from backend.session_service import (
     SessionNotFoundError,
     append_customer_message,
     close_session,
+    create_handoff_ticket,
     get_session,
     get_session_history,
     start_session,
@@ -63,6 +65,9 @@ def test_session_creation_persists_disclosure_and_started_audit(database) -> Non
     assert len(history.messages) == 1
     assert history.messages[0].role == MessageRole.ASSISTANT.value
     assert "automated assistant" in history.messages[0].text
+    assert "Typed messages" in history.messages[0].text
+    assert "recognized speech transcripts" in history.messages[0].text
+    assert "Microphone audio is not stored" in history.messages[0].text
     assert [event.action for event in history.audit_events] == ["session.started"]
 
 
@@ -126,6 +131,58 @@ def test_session_close_persists_outcome_and_audit(database) -> None:
         "session.ended",
     ]
     assert history.audit_events[-1].outcome == "unresolved"
+
+
+def test_handoff_ticket_persists_with_linked_audit_and_is_idempotent(database) -> None:
+    _, factory, _ = database
+    with factory() as db:
+        conversation = start_session(db, channel_type=ChannelType.TEXT_WEB.value)
+        session_id = UUID(conversation.id)
+        customer_message, _ = append_customer_message(
+            db,
+            session_id=session_id,
+            request=_request(
+                session_id,
+                "I want to speak to someone.",
+                datetime.now(UTC),
+            ),
+        )
+        trace_id = uuid4()
+        ticket = create_handoff_ticket(
+            db,
+            session_id=session_id,
+            originating_message_id=customer_message.id,
+            trace_id=trace_id,
+        )
+        retried_ticket = create_handoff_ticket(
+            db,
+            session_id=session_id,
+            originating_message_id=customer_message.id,
+            trace_id=uuid4(),
+        )
+        stored_tickets = list(
+            db.scalars(
+                select(HandoffTicket).where(
+                    HandoffTicket.session_id == str(session_id)
+                )
+            )
+        )
+        ticket_audit = db.scalar(
+            select(AuditEvent).where(
+                AuditEvent.session_id == str(session_id),
+                AuditEvent.action == "handoff_ticket.queued",
+            )
+        )
+
+    assert ticket.id == retried_ticket.id
+    assert ticket.status == "queued"
+    assert ticket.session_id == str(session_id)
+    assert ticket.originating_message_id == customer_message.id
+    assert ticket.created_at.tzinfo is not None
+    assert len(stored_tickets) == 1
+    assert ticket_audit is not None
+    assert ticket_audit.trace_id == str(trace_id)
+    assert ticket_audit.resource_id == ticket.id
 
 
 def test_unknown_session_is_rejected(database) -> None:
@@ -227,8 +284,9 @@ def test_data_survives_engine_disposal_and_separate_connection(database) -> None
         reopened_engine.dispose()
 
     assert [message.text for message in history.messages] == [
-        "I am an automated assistant. Text messages in this demo are stored "
-        "to support the conversation.",
+        "I am an automated assistant. Typed messages and recognized speech "
+        "transcripts are stored to support the conversation. Microphone audio "
+        "is not stored.",
         "persist me",
         "Your message was recorded. Automated response generation is not "
         "implemented yet.",

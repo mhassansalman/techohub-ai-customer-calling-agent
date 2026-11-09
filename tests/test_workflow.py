@@ -28,9 +28,13 @@ from backend.models import (
     AuditEvent,
     AvailabilityConversationContext,
     ConversationSession,
+    HandoffTicket,
     Message,
     PendingAvailabilityDateContext,
 )
+from backend.workflow import _handoff_confirmation_decision
+
+
 class UnavailableGroq:
     def __init__(self, code: ProviderErrorCode = ProviderErrorCode.MISSING_API_KEY):
         self.code = code
@@ -121,7 +125,7 @@ def test_hours_and_service_pricing_use_grounded_knowledge(tmp_path: Path) -> Non
     assert hours.status_code == 200
     assert "Saturday, 10:00–16:00 Etc/UTC" in hours.json()["assistant_message"]["text"]
     assert pricing.status_code == 200
-    assert "USD 35.00" in pricing.json()["assistant_message"]["text"]
+    assert "$35" in pricing.json()["assistant_message"]["text"]
     assert "30 minutes" in pricing.json()["assistant_message"]["text"]
 
 
@@ -323,7 +327,7 @@ def test_compound_hours_and_service_request_returns_both_grounded_answers(
     text = response.json()["assistant_message"]["text"]
     assert response.status_code == 200
     assert "closed on Sunday" in text
-    assert "USD 35.00" in text
+    assert "$35" in text
     assert "30 minutes" in text
     assert "clarify" not in text.casefold()
 
@@ -338,7 +342,7 @@ def test_haircut_price_question_uses_existing_catalog_answer(tmp_path: Path) -> 
         )
 
     text = response.json()["assistant_message"]["text"]
-    assert "USD 35.00" in text
+    assert "$35" in text
     assert "30 minutes" in text
 
 
@@ -460,7 +464,7 @@ def test_browser_voice_and_typed_turns_keep_same_response_contract(
             responses.append(payload)
 
     assert "closed on Sunday" in responses[0]["assistant_message"]["text"]
-    assert "USD 35.00" in responses[1]["assistant_message"]["text"]
+    assert "$35" in responses[1]["assistant_message"]["text"]
 
 
 def test_availability_missing_date_or_service_asks_for_clarification(
@@ -549,7 +553,7 @@ def test_timeout_and_rate_limit_and_invalid_outputs_do_not_crash_graph(
     )
 
 
-def test_complaint_and_human_request_never_claim_successful_handoff(
+def test_complaint_does_not_create_ticket_and_human_request_asks_confirmation(
     tmp_path: Path,
 ) -> None:
     app = _create_app(tmp_path)
@@ -562,8 +566,230 @@ def test_complaint_and_human_request_never_claim_successful_handoff(
     human_text = human.json()["assistant_message"]["text"].casefold()
     assert complaint.status_code == human.status_code == 200
     assert "can't create a support ticket" in complaint_text
-    assert "can't transfer this chat" in human_text
-    assert "ticket created" not in complaint_text + human_text
+    assert "would you like me to create a queued support ticket" in human_text
+    with app.state.session_factory() as db:
+        assert db.scalar(select(HandoffTicket)) is None
+
+
+def test_handoff_confirmation_rejection_ambiguity_and_unrelated_turns(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        rejected_session = _start_session(client)
+        request = _send(client, rejected_session, "I want to speak to someone.")
+        assert "reply yes or no" in request.json()["assistant_message"]["text"]
+        ambiguous = _send(client, rejected_session, "maybe")
+        assert "yes or no" in ambiguous.json()["assistant_message"]["text"]
+        rejected = _send(client, rejected_session, "No, thank you.")
+        assert "won't create a support ticket" in (
+            rejected.json()["assistant_message"]["text"]
+        )
+
+        unrelated_session = _start_session(client)
+        _send(client, unrelated_session, "I want to speak to someone.")
+        hours = _send(client, unrelated_session, "Are you open Saturday?")
+        assert "yes or no" in (
+            hours.json()["assistant_message"]["text"]
+        )
+        rejected_after_clarification = _send(client, unrelated_session, "no")
+        assert "won't create a support ticket" in (
+            rejected_after_clarification.json()["assistant_message"]["text"]
+        )
+
+        no_pending_session = _start_session(client)
+        no_pending = _send(client, no_pending_session, "yes")
+        assert "ticket ID" not in no_pending.json()["assistant_message"]["text"]
+
+    with app.state.session_factory() as db:
+        assert db.scalar(select(HandoffTicket)) is None
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "yes",
+        "yeah",
+        "yep",
+        "yup",
+        "sure",
+        "certainly",
+        "absolutely",
+        "okay",
+        "ok",
+        "okay okay",
+        "ok ok",
+        " ".join(["okay"] * 500),
+        " ".join(["ok"] * 500),
+        "yes please",
+        "yeah please",
+        "sure please",
+        "please do",
+        "go ahead",
+        "yes, yes",
+        " ".join(["yes"] * 500),
+        " ".join(["yep"] * 500),
+        " ".join(["yes"] * 500 + ["please"]),
+    ],
+)
+def test_handoff_confirmation_parser_accepts_exact_affirmative_forms(
+    answer: str,
+) -> None:
+    assert _handoff_confirmation_decision(answer) == "confirm"
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "no",
+        "nope",
+        "nah",
+        "no thanks",
+        "no thank you",
+        "no, no",
+        " ".join(["no"] * 500),
+        " ".join(["nah"] * 500),
+    ],
+)
+def test_handoff_confirmation_parser_accepts_exact_negative_forms(
+    answer: str,
+) -> None:
+    assert _handoff_confirmation_decision(answer) == "reject"
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "yes no",
+        "no yes",
+        "yes yes no",
+        "no no yes",
+        "I don't want to say yes",
+        "not yes",
+        "I am not sure",
+        "maybe yes",
+        "I don't know if I should",
+        "I said yes to my friend",
+        "Yesterday was sunny",
+        "Are you open on Sunday?",
+    ],
+)
+def test_handoff_confirmation_parser_does_not_guess_from_ambiguous_or_unrelated_text(
+    answer: str,
+) -> None:
+    decision = _handoff_confirmation_decision(answer)
+    assert decision != "confirm"
+    assert decision in {None, "clarify", "conflict"}
+
+
+@pytest.mark.parametrize(
+    ("create_pending_request", "confirmation", "expected_decision"),
+    [
+        (True, "yes yes", "confirm"),
+        (True, "yes, yes", "confirm"),
+        (True, "yes " * 100, "confirm"),
+        (True, "no no", "reject"),
+        (True, "no, no", "reject"),
+        (True, "yes no", "conflict"),
+        (True, "no no yes", "conflict"),
+        (True, "I don't want to say yes", "clarify"),
+        (True, "no yes", "conflict"),
+        (True, "what about tomorrow?", "unrecognized"),
+        (True, "okay okay", "confirm"),
+        (True, "ok " * 100, "confirm"),
+        (False, "yes yes", "no_ticket"),
+        (False, "yes " * 100, "no_ticket"),
+    ],
+)
+def test_repeated_handoff_confirmation_tokens_are_safe_and_idempotent(
+    tmp_path: Path,
+    create_pending_request: bool,
+    confirmation: str,
+    expected_decision: str,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        session_id = _start_session(client)
+        if create_pending_request:
+            request = _send(client, session_id, "I want to speak to someone.")
+            assert request.status_code == 200
+            assert "yes or no" in request.json()["assistant_message"]["text"]
+
+        response = _send(client, session_id, confirmation)
+        assert response.status_code == 200
+
+        with app.state.session_factory() as db:
+            tickets = list(
+                db.scalars(
+                    select(HandoffTicket).where(
+                        HandoffTicket.session_id == str(session_id)
+                    )
+                )
+            )
+
+        if expected_decision == "confirm":
+            assert len(tickets) == 1
+            assert tickets[0].status == "queued"
+            assert tickets[0].id in response.json()["assistant_message"]["text"]
+
+            repeated = _send(client, session_id, confirmation)
+            assert repeated.status_code == 200
+            with app.state.session_factory() as db:
+                tickets = list(
+                    db.scalars(
+                        select(HandoffTicket).where(
+                            HandoffTicket.session_id == str(session_id)
+                        )
+                    )
+                )
+            assert len(tickets) == 1
+        elif expected_decision == "reject":
+            assert tickets == []
+            assert "won't create a support ticket" in (
+                response.json()["assistant_message"]["text"]
+            )
+        elif expected_decision == "clarify":
+            assert tickets == []
+            assert "yes or no" in (
+                response.json()["assistant_message"]["text"]
+            )
+        elif expected_decision == "conflict":
+            assert tickets == []
+            assert "I heard both yes and no" in (
+                response.json()["assistant_message"]["text"]
+            )
+        elif expected_decision == "unrecognized":
+            assert tickets == []
+            assert response.json()["assistant_message"]["text"] == (
+                "Please say yes or no, or use the confirmation buttons."
+            )
+        else:
+            assert tickets == []
+            assert "ticket ID" not in response.json()["assistant_message"]["text"]
+
+
+def test_short_acknowledgment_without_pending_handoff_is_natural_and_safe(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        session_id = _start_session(client)
+        response = _send(client, session_id, "okay okay")
+
+        with app.state.session_factory() as db:
+            tickets = list(
+                db.scalars(
+                    select(HandoffTicket).where(
+                        HandoffTicket.session_id == str(session_id)
+                    )
+                )
+            )
+
+    assert response.status_code == 200
+    assert response.json()["assistant_message"]["text"] == (
+        "Thanks. What can I help you with?"
+    )
+    assert tickets == []
 
 
 def test_booking_request_does_not_mutate_fixture_or_claim_booking(
@@ -575,8 +801,49 @@ def test_booking_request_does_not_mutate_fixture_or_claim_booking(
         response = _send(client, session_id, "Book a haircut appointment Friday.")
 
     text = response.json()["assistant_message"]["text"]
-    assert "No appointment was created" in text
-    assert "created" in text.casefold()
+    assert text == (
+        "I can check the recorded slots, but I can't book an appointment in this demo."
+    )
+
+
+def test_unknown_service_gets_grounded_customer_friendly_response(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        response = _send(
+            client,
+            _start_session(client),
+            "Do you offer hair coloring?",
+        )
+
+    text = response.json()["assistant_message"]["text"]
+    assert response.status_code == 200
+    assert text == (
+        "Sorry, I don't have approved details for that service, so I can't "
+        "confirm whether we offer it."
+    )
+    assert "couldn't safely understand" not in text.casefold()
+    assert "hair coloring" not in text.casefold()
+
+
+def test_read_only_availability_remains_available_and_does_not_book(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        response = _send(
+            client,
+            _start_session(client),
+            "Which haircut slots are open on Friday?",
+        )
+
+    text = response.json()["assistant_message"]["text"]
+    assert response.status_code == 200
+    assert "Recorded fixture availability for haircut on 2026-10-30" in text
+    assert "10:00 Etc/UTC" in text
+    assert "does not book an appointment" in text
+    assert "can't check availability" not in text.casefold()
 
 
 def test_unknown_closed_and_invalid_classifier_sessions_are_safe(
@@ -626,10 +893,13 @@ def test_persisted_response_audit_and_openapi_contract(tmp_path: Path) -> None:
     assert status_response.status_code == 200
     assert "messages" not in status_response.json()
     assert set(openapi["paths"]) == {
+        "/api/services",
         "/api/sessions",
         "/api/sessions/{session_id}",
         "/api/sessions/{session_id}/messages",
         "/api/sessions/{session_id}/end",
+        "/api/staff/tickets",
+        "/api/staff/tickets/{ticket_id}",
     }
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
@@ -74,3 +75,23 @@ class SessionMessageResponse(BaseModel):
 
     customer_message: MessageResponse
     assistant_message: MessageResponse
+
+
+class StaffTicketResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, frozen=True)
+
+    id: UUID
+    session_id: UUID
+    originating_message_id: UUID
+    status: Literal["queued"]
+    created_at: datetime
+
+
+class ServiceCatalogItem(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    service_id: str
+    name: str
+    price_amount: Decimal
+    currency: str
+    duration_minutes: int

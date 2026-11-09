@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import secrets
 from contextlib import asynccontextmanager
 from collections.abc import Generator
 from typing import AsyncIterator
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Path, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -19,6 +21,7 @@ from backend.database import (
     create_session_factory,
     database_session_dependency,
 )
+from backend.fixtures import load_demo_salon_fixture
 from backend.intent import (
     ClassifierConfig,
     GroqClassificationAdapter,
@@ -26,14 +29,22 @@ from backend.intent import (
     RuleFirstIntentClassifier,
 )
 from backend.knowledge import KnowledgeService
-from backend.models import AuditEvent, ConversationSession, Message, SessionStatus
+from backend.models import (
+    AuditEvent,
+    ConversationSession,
+    HandoffTicket,
+    Message,
+    SessionStatus,
+)
 from backend.schemas import (
     MessageResponse,
+    ServiceCatalogItem,
     SessionEndRequest,
     SessionMessageResponse,
     SessionStartRequest,
     SessionStartResponse,
     SessionStatusResponse,
+    StaffTicketResponse,
 )
 from backend.session_service import (
     ASSISTANT_DISCLOSURE,
@@ -54,6 +65,25 @@ WORKFLOW_FAILURE_RESPONSE = (
     "I couldn't safely complete that request right now. Your message was "
     "recorded; please try again later."
 )
+
+
+def require_staff_api_key(
+    x_staff_api_key: str | None = Header(default=None, alias="X-Staff-API-Key"),
+) -> None:
+    configured_key = os.getenv("STAFF_API_KEY")
+    if not configured_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Staff ticket service is not configured.",
+        )
+    if not x_staff_api_key or not secrets.compare_digest(
+        configured_key.encode("utf-8"),
+        x_staff_api_key.encode("utf-8"),
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Staff authentication required.",
+        )
 
 
 def _session_status_response(
@@ -129,6 +159,41 @@ def create_app(
 
     def get_db() -> Generator[Session, None, None]:
         yield from database_session_dependency(app.state.session_factory)
+
+    @app.get(
+        "/health",
+        include_in_schema=False,
+    )
+    def health_check():
+        return {"status": "ok"}
+
+    @app.get(
+        "/api/services",
+        response_model=list[ServiceCatalogItem],
+    )
+    def list_services() -> list[ServiceCatalogItem]:
+        try:
+            fixture = load_demo_salon_fixture()
+        except (OSError, ValueError) as error:
+            logger.error(
+                "Approved service catalog could not be loaded (%s)",
+                type(error).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Approved service catalog is temporarily unavailable.",
+            ) from error
+        return [
+            ServiceCatalogItem(
+                service_id=service.service_id,
+                name=service.name,
+                price_amount=service.price_amount,
+                currency=service.currency,
+                duration_minutes=service.duration_minutes,
+            )
+            for service in fixture.services
+            if service.active
+        ]
 
     @app.post(
         "/api/sessions",
@@ -269,6 +334,40 @@ def create_app(
                 detail="Session is already closed.",
             ) from error
         return _session_status_response(db, conversation)
+
+    @app.get(
+        "/api/staff/tickets",
+        response_model=list[StaffTicketResponse],
+    )
+    def list_staff_tickets(
+        _: None = Depends(require_staff_api_key),
+        db: Session = Depends(get_db),
+        limit: int = Query(default=50, ge=1, le=100),
+    ) -> list[StaffTicketResponse]:
+        tickets = db.scalars(
+            select(HandoffTicket)
+            .where(HandoffTicket.status == "queued")
+            .order_by(HandoffTicket.created_at.desc(), HandoffTicket.id.desc())
+            .limit(limit)
+        )
+        return [StaffTicketResponse.model_validate(ticket) for ticket in tickets]
+
+    @app.get(
+        "/api/staff/tickets/{ticket_id}",
+        response_model=StaffTicketResponse,
+    )
+    def read_staff_ticket(
+        ticket_id: UUID = Path(),
+        _: None = Depends(require_staff_api_key),
+        db: Session = Depends(get_db),
+    ) -> StaffTicketResponse:
+        ticket = db.get(HandoffTicket, str(ticket_id))
+        if ticket is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Ticket not found.",
+            )
+        return StaffTicketResponse.model_validate(ticket)
 
     return app
 
