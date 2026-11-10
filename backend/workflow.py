@@ -15,6 +15,15 @@ from backend.availability import (
     AvailabilityResponse,
     AvailabilityStatus,
 )
+from backend.agents import (
+    AgentRegistry,
+    AvailabilityAgent,
+    Complexity,
+    ComplexityAssessment,
+    ComplexityClassifier,
+    FaqAgent,
+    SupportAgent,
+)
 from backend.channels import CustomerRequest
 from backend.intent import (
     ClassificationStatus,
@@ -78,6 +87,7 @@ class ConversationState(TypedDict, total=False):
     db: Session
     has_pending_availability_context: bool
     classification: IntentClassification
+    complexity_assessment: ComplexityAssessment
     capability_results: tuple[CapabilityResult, ...]
     response: ConversationWorkflowResult
 
@@ -105,6 +115,20 @@ class ConversationWorkflow:
         self._semantic_retriever = semantic_retriever
         self._rag_enabled = rag_enabled
         self._rag_provider = rag_provider
+        self._complexity_classifier = ComplexityClassifier()
+        self._agent_registry = AgentRegistry()
+        self._agent_registry.register(
+            Intent.FAQ_BUSINESS_HOURS,
+            FaqAgent(self.knowledge, self._lexical_retriever or RagRetriever()),
+        )
+        self._agent_registry.register(
+            Intent.APPOINTMENT_AVAILABILITY,
+            AvailabilityAgent(self.availability),
+        )
+        self._agent_registry.register(
+            Intent.HUMAN_REQUEST,
+            SupportAgent(create_handoff_ticket, self.knowledge),
+        )
         self.graph = self._build_graph()
 
     async def run(
@@ -234,6 +258,7 @@ class ConversationWorkflow:
     def _build_graph(self):
         builder = StateGraph(ConversationState)
         builder.add_node("classify_intent", self._classify_intent)
+        builder.add_node("classify_complexity", self._classify_complexity)
         builder.add_node("faq_capability", self._faq_capability)
         builder.add_node("availability_capability", self._availability_capability)
         builder.add_node("date_correction", self._date_correction)
@@ -241,18 +266,28 @@ class ConversationWorkflow:
         builder.add_node("multi_intent_capability", self._multi_intent_capability)
         builder.add_node("clarification", self._clarification)
         builder.add_node("aggregate_response", self._aggregate_response)
+        # A10/A11: Specialized agent nodes
+        builder.add_node("agent_faq", self._agent_faq_capability)
+        builder.add_node("agent_availability", self._agent_availability_capability)
+        builder.add_node("agent_support", self._agent_support_capability)
 
         builder.add_edge(START, "classify_intent")
+        builder.add_edge("classify_intent", "classify_complexity")
         builder.add_conditional_edges(
-            "classify_intent",
-            self._route,
+            "classify_complexity",
+            self._route_complexity,
             {
-                "faq": "faq_capability",
-                "availability": "availability_capability",
-                "date_correction": "date_correction",
-                "support": "support_capability",
-                "multi": "multi_intent_capability",
-                "clarification": "clarification",
+                # Simple path → existing capability nodes
+                "simple_faq": "faq_capability",
+                "simple_availability": "availability_capability",
+                "simple_date_correction": "date_correction",
+                "simple_support": "support_capability",
+                "simple_multi": "multi_intent_capability",
+                "simple_clarification": "clarification",
+                # Complex path → agent nodes
+                "complex_faq": "agent_faq",
+                "complex_availability": "agent_availability",
+                "complex_support": "agent_support",
             },
         )
         for node in (
@@ -262,6 +297,9 @@ class ConversationWorkflow:
             "support_capability",
             "multi_intent_capability",
             "clarification",
+            "agent_faq",
+            "agent_availability",
+            "agent_support",
         ):
             builder.add_edge(node, "aggregate_response")
         builder.add_edge("aggregate_response", END)
@@ -288,8 +326,55 @@ class ConversationWorkflow:
             )
         return {"classification": classification}
 
+    async def _classify_complexity(
+        self,
+        state: ConversationState,
+    ) -> dict[str, ComplexityAssessment]:
+        classification = state["classification"]
+        intents = classification.intents
+        if not intents:
+            return {
+                "complexity_assessment": ComplexityAssessment(
+                    complexity=Complexity.SIMPLE,
+                    reason="no_intents",
+                    agent=None,
+                )
+            }
+        assessment = self._complexity_classifier.classify(
+            state["request"], intents
+        )
+        return {"complexity_assessment": assessment}
+
     @staticmethod
-    def _route(state: ConversationState) -> str:
+    def _route_complexity(state: ConversationState) -> str:
+        assessment = state.get("complexity_assessment")
+        if assessment is None:
+            return "simple_clarification"
+        classification = state["classification"]
+        intents = classification.intents
+        if not intents or Intent.UNSUPPORTED in intents:
+            return "simple_clarification"
+        if len(intents) > 1:
+            return "simple_multi"
+        intent = intents[0]
+        if assessment.complexity == Complexity.SIMPLE:
+            if intent in {Intent.FAQ_BUSINESS_HOURS, Intent.FAQ_SERVICE_POLICY}:
+                return "simple_faq"
+            if intent is Intent.APPOINTMENT_AVAILABILITY:
+                return "simple_availability"
+            if intent is Intent.APPOINTMENT_DATE_CORRECTION:
+                return "simple_date_correction"
+            if intent in _SUPPORT_INTENTS:
+                return "simple_support"
+            return "simple_clarification"
+        # Complex path -> agent nodes
+        if intent in {Intent.FAQ_BUSINESS_HOURS, Intent.FAQ_SERVICE_POLICY}:
+            return "complex_faq"
+        if intent is Intent.APPOINTMENT_AVAILABILITY:
+            return "complex_availability"
+        if intent in _SUPPORT_INTENTS:
+            return "complex_support"
+        return "simple_clarification"
         classification = state["classification"]
         if classification.status is not ClassificationStatus.CLASSIFIED:
             return "clarification"
@@ -379,6 +464,112 @@ class ConversationWorkflow:
                     intent,
                     state["request"].message_text,
                     self.knowledge,
+                ),
+            )
+        }
+
+    # A10/A11: Specialized agent capabilities - route complex requests through agents
+    def _agent_faq_capability(
+        self,
+        state: ConversationState,
+    ) -> dict[str, tuple[CapabilityResult, ...]]:
+        classification = state["classification"]
+        text = state["request"].message_text
+        handler = self._agent_registry.get(Intent.FAQ_BUSINESS_HOURS)
+        if handler is None:
+            # Fall back to deterministic FAQ capability
+            return self._faq_capability(state)
+        result = handler.handle(state["request"])
+        return {
+            "capability_results": (
+                CapabilityResult(
+                    intent=classification.intents[0],
+                    text=result["text"],
+                    source_ids=result.get("source_ids", ()),
+                    outcome=result.get("outcome", "answered"),
+                    retrieval_reason=tuple(
+                        result.get("retrieval_reason", "")
+                    )
+                    if result.get("retrieval_reason")
+                    else (),
+                ),
+            )
+        }
+
+    def _agent_availability_capability(
+        self,
+        state: ConversationState,
+    ) -> dict[str, tuple[CapabilityResult, ...]]:
+        classification = state["classification"]
+        handler = self._agent_registry.get(Intent.APPOINTMENT_AVAILABILITY)
+        if handler is None:
+            return self._availability_capability(state)
+        result = handler.handle(
+            state["request"],
+            db=state["db"],
+            session_id=state["session_id"],
+        )
+        # Map availability response status to a valid CapabilityResult outcome.
+        raw_outcome = result.get("outcome", "answered")
+        valid_outcomes = {"answered", "clarification", "handoff_unavailable", "unsupported"}
+        if raw_outcome in valid_outcomes:
+            outcome: Literal["answered", "clarification", "handoff_unavailable", "unsupported"] = raw_outcome
+        elif raw_outcome in {
+            AvailabilityStatus.AVAILABLE.value,
+            AvailabilityStatus.NO_RECORDED_SLOTS.value,
+        }:
+            outcome = "answered"
+        elif raw_outcome in {
+            AvailabilityStatus.NEEDS_CONTEXT.value,
+            AvailabilityStatus.AMBIGUOUS.value,
+            AvailabilityStatus.INVALID_DATE.value,
+        }:
+            outcome = "clarification"
+        else:
+            outcome = "unsupported"
+        return {
+            "capability_results": (
+                CapabilityResult(
+                    intent=classification.intents[0],
+                    text=result["text"],
+                    source_ids=result.get("source_ids", ()),
+                    outcome=outcome,
+                    retrieval_reason=tuple(
+                        result.get("retrieval_reason", "")
+                    )
+                    if result.get("retrieval_reason")
+                    else (),
+                ),
+            )
+        }
+
+    def _agent_support_capability(
+        self,
+        state: ConversationState,
+    ) -> dict[str, tuple[CapabilityResult, ...]]:
+        classification = state["classification"]
+        handler = self._agent_registry.get(Intent.HUMAN_REQUEST)
+        if handler is None:
+            return self._support_capability(state)
+        result = handler.handle(
+            state["request"],
+            db=state["db"],
+            session_id=state["session_id"],
+            trace_id=state["request"].trace_id,
+            intent=classification.intents[0],
+        )
+        return {
+            "capability_results": (
+                CapabilityResult(
+                    intent=classification.intents[0],
+                    text=result["text"],
+                    source_ids=result.get("source_ids", ()),
+                    outcome=result.get("outcome", "handoff_unavailable"),
+                    retrieval_reason=tuple(
+                        result.get("retrieval_reason", "")
+                    )
+                    if result.get("retrieval_reason")
+                    else (),
                 ),
             )
         }
