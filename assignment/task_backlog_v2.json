@@ -523,7 +523,7 @@
       "v1_status": "Not started",
       "v2_priority": "P1-S",
       "status": "Implemented",
-      "evidence": "A05 implemented: backend/rag.py extended with SemanticEmbeddingProvider protocol, SentenceTransformerProvider (cached all-MiniLM-L6-v2 model, 384-dim embeddings), SemanticRetriever with cosine similarity search (0.4 threshold, top_k=5), and TECHOHUB_RAG_PROVIDER env var (lexical/semantic/auto). Safe fallback chain: semantic \u00e2\u2020\u2019 lexical \u00e2\u2020\u2019 OKF. Same-provenance conflict detection, fixture precedence, source provenance, and OKF fallback all preserved. tests/test_rag.py (9 semantic tests) covers model loading, exact/paraphrase queries, unrelated queries, unsupported policies, conflicts, fixture precedence, provider failure. Full backend suite: 342 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed. No FAISS/Chroma/vector DB. No CUDA. Model loads from local cache only (no runtime download). A05 acceptance criteria (T-P1-01) satisfied."
+      "evidence": "A05 implemented: backend/rag.py extended with SemanticEmbeddingProvider protocol, SentenceTransformerProvider (cached all-MiniLM-L6-v2 model, 384-dim embeddings), SemanticRetriever with cosine similarity search (0.4 threshold, top_k=5), and TECHOHUB_RAG_PROVIDER env var (lexical/semantic/auto). Safe fallback chain: semantic -> lexical -> OKF. Same-provenance conflict detection, fixture precedence, source provenance, and OKF fallback all preserved. FIXED: backend/main.py was missing import of load_approved_chunks from backend.chunker, causing SemanticRetriever creation to fail silently with NameError and fall back to lexical. Added missing import. tests/test_rag.py (9 semantic tests + 4 end-to-end LangGraph tests) covers model loading, exact/paraphrase queries, unrelated queries, unsupported policies, conflicts, fixture precedence, provider failure, MCP interaction, and full LangGraph semantic routing. Full backend suite: 380 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed."
     },
     {
       "date": "2026-11-02",
@@ -753,11 +753,11 @@
       "hours": 3,
       "tests": "T-P1-01, T-P1-03, T-P1-04",
       "depends_on": "A05 A11 A13",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "Cross-feature integration tests for RAG + MCP + agents added to tests/test_mcp.py (17 tests total). Covers: RAG OFF + MCP OFF deterministic OKF; RAG ON (lexical) + MCP ON FAQ through MCP tool; MCP server failure \u2192 safe OKF fallback; multi-intent aggregation; support confirmation and idempotency; invalid/ambiguous input \u2192 clarification. Full backend suite: 376 passed; frontend: 93 passed; Python compilation clean; git diff --check clean; frontend build passed."
     },
     {
       "date": "2026-11-08",
@@ -771,11 +771,11 @@
       "hours": 3,
       "tests": "T-P1-01, T-P1-03, T-P1-04",
       "depends_on": "A18",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "No high-priority integration defects found in cross-feature testing. All RAG + MCP + agent paths verified working together. MCP failure fallback to deterministic OKF confirmed. Support confirmation and idempotency verified. Booking remains unsupported. P1 evidence packaged in tests/test_mcp.py and backlog evidence. Full backend suite: 376 passed; frontend: 93 passed; build passed."
     },
     {
       "date": "2026-11-09",

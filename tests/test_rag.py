@@ -1,24 +1,40 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
+from datetime import UTC, datetime
 from decimal import Decimal
+from uuid import UUID, uuid4
 
 import pytest
 
+from backend.channels import ChannelType, CustomerRequest, InputModality
 from backend.chunker import (
     KnowledgeChunk,
     KnowledgeChunkIndex,
     chunk_record,
     load_approved_chunks,
 )
+from backend.database import Base
 from backend.fixtures import load_demo_salon_fixture
+from backend.intent import (
+    ClassificationStatus,
+    ClassifierSource,
+    ClassificationEntities,
+    Intent,
+    IntentClassification,
+    classify_with_rules,
+)
 from backend.knowledge import (
     AnswerStatus,
     KnowledgeCategory,
     KnowledgeRecord,
     KnowledgeService,
 )
+from backend.main import create_app
+from backend.workflow import ConversationWorkflow
+from backend.availability import AvailabilityConversationService
 from backend.rag import (
     EvidenceItem,
     FusionStatus,
@@ -28,6 +44,21 @@ from backend.rag import (
     SemanticRetriever,
     SentenceTransformerProvider,
 )
+
+
+class _RulesOnlyClassifier:
+    """Deterministic rules-only classifier (no Groq) for workflow tests."""
+
+    async def classify(
+        self,
+        text: str,
+        *,
+        has_pending_availability_context: bool = False,
+    ) -> IntentClassification:
+        return classify_with_rules(
+            text,
+            has_pending_availability_context=has_pending_availability_context,
+        )
 
 
 def _make_chunk(
@@ -552,3 +583,219 @@ def test_semantic_retriever_provider_failure_falls_back_to_lexical() -> None:
         pytest.fail("Expected RuntimeError from failing provider")
     except RuntimeError:
         pass
+
+
+def _run_workflow(
+    workflow: ConversationWorkflow,
+    session_id: UUID,
+    message_text: str,
+    db,
+) -> object:
+    """Run a conversation workflow with a real SQLAlchemy session."""
+    request = CustomerRequest(
+        session_id=session_id,
+        trace_id=uuid4(),
+        timestamp=datetime.now(UTC),
+        channel_type=ChannelType.TEXT_WEB,
+        modality=InputModality.TEXT,
+        message_text=message_text,
+    )
+    return asyncio.run(workflow.run(session_id=session_id, request=request, db=db))
+
+
+def test_langgraph_semantic_routing_end_to_end(tmp_path: Path) -> None:
+    """TECHOHUB_RAG_ENABLED=true + semantic → full LangGraph FAQ path uses
+    SemanticRetriever with actual pretrained embeddings (MCP OFF)."""
+    import os
+
+    os.environ["TECHOHUB_RAG_ENABLED"] = "true"
+    os.environ["TECHOHUB_RAG_PROVIDER"] = "semantic"
+
+    try:
+        app = create_app(
+            f"sqlite:///{(tmp_path / 'semantic_e2e.sqlite3').as_posix()}",
+            classifier=_RulesOnlyClassifier(),
+        )
+        Base.metadata.create_all(app.state.database_engine)
+        try:
+            with app.state.session_factory() as db:
+                workflow = app.state.conversation_workflow
+                assert workflow._rag_enabled is True
+                assert workflow._rag_provider == "semantic"
+                assert workflow._semantic_retriever is not None
+
+                result = _run_workflow(
+                    workflow,
+                    uuid4(),
+                    "What's the cost of getting my hair cut?",  # paraphrase
+                    db,
+                )
+
+            assert result.outcome == "answered"
+            assert "$35" in result.response_text or "35.00" in result.response_text
+        finally:
+            app.state.database_engine.dispose()
+    finally:
+        for k in ("TECHOHUB_RAG_ENABLED", "TECHOHUB_RAG_PROVIDER"):
+            os.environ.pop(k, None)
+
+
+def test_langgraph_lexical_routing_end_to_end(tmp_path: Path) -> None:
+    """TECHOHUB_RAG_ENABLED=true + lexical → full LangGraph FAQ path uses
+    lexical RagRetriever, not semantic (MCP OFF)."""
+    import os
+
+    os.environ["TECHOHUB_RAG_ENABLED"] = "true"
+    os.environ["TECHOHUB_RAG_PROVIDER"] = "lexical"
+
+    try:
+        app = create_app(
+            f"sqlite:///{(tmp_path / 'lexical_e2e.sqlite3').as_posix()}",
+            classifier=_RulesOnlyClassifier(),
+        )
+        Base.metadata.create_all(app.state.database_engine)
+        try:
+            with app.state.session_factory() as db:
+                workflow = app.state.conversation_workflow
+                assert workflow._rag_enabled is True
+                assert workflow._rag_provider == "lexical"
+                assert workflow._semantic_retriever is None
+                assert workflow._lexical_retriever is not None
+
+                result = _run_workflow(
+                    workflow,
+                    uuid4(),
+                    "How much is one haircut?",
+                    db,
+                )
+
+            assert result.outcome == "answered"
+            assert "$35" in result.response_text or "35.00" in result.response_text
+        finally:
+            app.state.database_engine.dispose()
+    finally:
+        for k in ("TECHOHUB_RAG_ENABLED", "TECHOHUB_RAG_PROVIDER"):
+            os.environ.pop(k, None)
+
+
+def test_mcp_on_does_not_override_semantic_retrieval(tmp_path: Path) -> None:
+    """MCP ON + semantic RAG → semantic retrieval still used for FAQ;
+    MCP does not bypass the selected semantic path."""
+    import os
+
+    os.environ["TECHOHUB_RAG_ENABLED"] = "true"
+    os.environ["TECHOHUB_RAG_PROVIDER"] = "semantic"
+    os.environ["TECHOHUB_MCP_ENABLED"] = "true"
+
+    try:
+        app = create_app(
+            f"sqlite:///{(tmp_path / 'mcp_semantic.sqlite3').as_posix()}",
+            classifier=_RulesOnlyClassifier(),
+        )
+        Base.metadata.create_all(app.state.database_engine)
+        try:
+            with app.state.session_factory() as db:
+                workflow = app.state.conversation_workflow
+                assert workflow._rag_enabled is True
+                assert workflow._rag_provider == "semantic"
+                assert workflow._semantic_retriever is not None
+                assert workflow._mcp_enabled is True
+
+                result = _run_workflow(
+                    workflow,
+                    uuid4(),
+                    "What's the cost of getting my hair cut?",  # paraphrase
+                    db,
+                )
+
+            assert result.outcome == "answered"
+            assert "$35" in result.response_text or "35.00" in result.response_text
+        finally:
+            app.state.database_engine.dispose()
+    finally:
+        for k in ("TECHOHUB_RAG_ENABLED", "TECHOHUB_RAG_PROVIDER", "TECHOHUB_MCP_ENABLED"):
+            os.environ.pop(k, None)
+
+def test_langgraph_default_lexical_okf(tmp_path: Path) -> None:
+    """Default config (RAG OFF, MCP OFF) → deterministic OKF path, no semantic."""
+    import os
+
+    for k in ("TECHOHUB_RAG_ENABLED", "TECHOHUB_RAG_PROVIDER", "TECHOHUB_MCP_ENABLED"):
+        os.environ.pop(k, None)
+
+    try:
+        app = create_app(
+            f"sqlite:///{(tmp_path / 'default_e2e.sqlite3').as_posix()}",
+            classifier=_RulesOnlyClassifier(),
+        )
+        Base.metadata.create_all(app.state.database_engine)
+        try:
+            with app.state.session_factory() as db:
+                workflow = app.state.conversation_workflow
+                assert workflow._rag_enabled is False
+                assert workflow._rag_provider == "lexical"
+                assert workflow._semantic_retriever is None
+                assert workflow._lexical_retriever is None
+                assert workflow._mcp_client is None
+
+                result = _run_workflow(
+                    workflow,
+                    uuid4(),
+                    "How much is one haircut?",
+                    db,
+                )
+
+            assert result.outcome == "answered"
+            assert "$35" in result.response_text or "35.00" in result.response_text
+        finally:
+            app.state.database_engine.dispose()
+    finally:
+        for k in ("TECHOHUB_RAG_ENABLED", "TECHOHUB_RAG_PROVIDER", "TECHOHUB_MCP_ENABLED"):
+            os.environ.pop(k, None)
+
+def test_semantic_provider_initialization_not_silently_bypassed():
+    """create_app() with TECHOHUB_RAG_PROVIDER=semantic must wire a real
+    SemanticRetriever into the workflow.
+
+    If ``load_approved_chunks`` is not imported in backend/main.py, the
+    ``SemanticRetriever(index=load_approved_chunks(), ...)`` call raises
+    NameError, which is silently caught and ``semantic_retriever`` stays
+    None. This test fails if that missing-import defect is reintroduced.
+    """
+    import os
+
+    os.environ["TECHOHUB_RAG_ENABLED"] = "true"
+    os.environ["TECHOHUB_RAG_PROVIDER"] = "semantic"
+    try:
+        app = create_app("sqlite:///:memory:", classifier=_RulesOnlyClassifier())
+        wf = app.state.conversation_workflow
+        assert wf._rag_enabled is True
+        assert wf._rag_provider == "semantic"
+        assert isinstance(wf._semantic_retriever, SemanticRetriever)
+        assert wf._lexical_retriever is not None
+        # The configured workflow actually holds the semantic retriever it
+        # will use for FAQ capability nodes.
+        assert wf._semantic_retriever.provider is not None
+    finally:
+        for k in ("TECHOHUB_RAG_ENABLED", "TECHOHUB_RAG_PROVIDER"):
+            os.environ.pop(k, None)
+
+
+def test_default_rag_off_remains_deterministic():
+    """Default config (RAG OFF, MCP OFF) keeps deterministic OKF path with
+    no semantic retriever and no MCP client."""
+    import os
+
+    for k in ("TECHOHUB_RAG_ENABLED", "TECHOHUB_RAG_PROVIDER", "TECHOHUB_MCP_ENABLED"):
+        os.environ.pop(k, None)
+    try:
+        app = create_app("sqlite:///:memory:", classifier=_RulesOnlyClassifier())
+        wf = app.state.conversation_workflow
+        assert wf._rag_enabled is False
+        assert wf._rag_provider == "lexical"
+        assert wf._semantic_retriever is None
+        assert wf._lexical_retriever is None
+        assert wf._mcp_client is None
+    finally:
+        for k in ("TECHOHUB_RAG_ENABLED", "TECHOHUB_RAG_PROVIDER", "TECHOHUB_MCP_ENABLED"):
+            os.environ.pop(k, None)

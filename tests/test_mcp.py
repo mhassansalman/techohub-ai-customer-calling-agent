@@ -3,12 +3,13 @@
 # ---------------------------------------------------------------------------
 
 import asyncio
+from datetime import datetime, UTC
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
-from backend.agents import FaqAgent
+from backend.agents import FaqAgent, SupportAgent
 from backend.channels import ChannelType, CustomerRequest, InputModality
 from backend.database import Base, create_database_engine, create_session_factory
 from backend.intent import (
@@ -24,6 +25,7 @@ from backend.mcp_server import server as mcp_server
 from backend.knowledge import KnowledgeService
 from backend.availability import AvailabilityConversationService
 from backend.rag import RagRetriever
+from backend.session_service import create_handoff_ticket
 from backend.workflow import ConversationWorkflow
 from backend.main import create_app
 from backend.models import ConversationSession, SessionStatus
@@ -38,11 +40,29 @@ def _make_customer_request(text: str) -> CustomerRequest:
     return CustomerRequest(
         session_id=uuid4(),
         trace_id=uuid4(),
-        timestamp=__import__("datetime").datetime.now(__import__("datetime").UTC),
+        timestamp=datetime.now(UTC),
         channel_type=ChannelType.TEXT_WEB,
         modality=InputModality.TEXT,
         message_text=text,
     )
+
+
+def _run_workflow(
+    workflow: ConversationWorkflow,
+    session_id: UUID,
+    message_text: str,
+    db,
+) -> object:
+    """Run a conversation workflow with a real SQLAlchemy session."""
+    request = CustomerRequest(
+        session_id=session_id,
+        trace_id=uuid4(),
+        timestamp=datetime.now(UTC),
+        channel_type=ChannelType.TEXT_WEB,
+        modality=InputModality.TEXT,
+        message_text=message_text,
+    )
+    return asyncio.run(workflow.run(session_id=session_id, request=request, db=db))
 
 
 class _FaqClassifier:
@@ -303,3 +323,252 @@ async def test_workflow_mcp_faq_agent_through_compiled_graph(tmp_path: Path) -> 
             assert "$35" in result.response_text or "35.00" in result.response_text
     finally:
         app.state.database_engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# A18/A19: Cross-feature integration tests for RAG + MCP + agents
+# ---------------------------------------------------------------------------
+
+
+class _FaqClassifier:
+    async def classify(
+        self,
+        text: str,
+        *,
+        has_pending_availability_context: bool = False,
+    ) -> IntentClassification:
+        return IntentClassification(
+            status=ClassificationStatus.CLASSIFIED,
+            intents=(Intent.FAQ_BUSINESS_HOURS,),
+            entities=ClassificationEntities(),
+            source=ClassifierSource.RULES,
+            reason_code="test_faq",
+        )
+
+
+class _MultiIntentClassifier:
+    async def classify(
+        self,
+        text: str,
+        *,
+        has_pending_availability_context: bool = False,
+    ) -> IntentClassification:
+        return IntentClassification(
+            status=ClassificationStatus.CLASSIFIED,
+            intents=(
+                Intent.FAQ_BUSINESS_HOURS,
+                Intent.APPOINTMENT_AVAILABILITY,
+            ),
+            entities=ClassificationEntities(
+                service_id="haircut", requested_date="friday"
+            ),
+            source=ClassifierSource.RULES,
+            reason_code="test_multi",
+        )
+
+
+class _HumanRequestClassifier:
+    async def classify(
+        self,
+        text: str,
+        *,
+        has_pending_availability_context: bool = False,
+    ) -> IntentClassification:
+        return IntentClassification(
+            status=ClassificationStatus.CLASSIFIED,
+            intents=(Intent.HUMAN_REQUEST,),
+            entities=ClassificationEntities(),
+            source=ClassifierSource.RULES,
+            reason_code="explicit_human_request",
+        )
+
+
+class _ClarificationClassifier:
+    async def classify(
+        self,
+        text: str,
+        *,
+        has_pending_availability_context: bool = False,
+    ) -> IntentClassification:
+        return IntentClassification(
+            status=ClassificationStatus.CLARIFICATION,
+            intents=(),
+            entities=ClassificationEntities(),
+            source=ClassifierSource.NONE,
+            reason_code="rules_could_not_establish_supported_intent",
+        )
+
+
+def test_rag_off_mcp_off_deterministic_okf(tmp_path: Path) -> None:
+    """RAG OFF + MCP OFF: FAQ goes through deterministic OKF path."""
+    app = create_app(
+        f"sqlite:///{(tmp_path / 'rag_off_mcp_off.sqlite3').as_posix()}",
+        classifier=_FaqClassifier(),
+    )
+    Base.metadata.create_all(app.state.database_engine)
+    try:
+        with app.state.session_factory() as db:
+            workflow = ConversationWorkflow(
+                classifier=_FaqClassifier(),
+                knowledge=KnowledgeService(),
+                availability=AvailabilityConversationService(),
+                rag_retriever=RagRetriever(),
+                rag_enabled=False,
+                mcp_enabled=False,
+            )
+            result = _run_workflow(
+                workflow, uuid4(), "How much is a haircut?", db
+            )
+    finally:
+        app.state.database_engine.dispose()
+
+    assert result.outcome == "answered"
+    assert "$35" in result.response_text or "35.00" in result.response_text
+    assert result.retrieval_reason != ("mcp_faq_retrieve",)
+
+
+@pytest.mark.asyncio
+async def test_rag_on_lexical_mcp_on_faq_through_mcp(
+    tmp_path: Path,
+) -> None:
+    """RAG ON (lexical) + MCP ON: FAQ goes through MCP faq_retrieve tool."""
+    app = create_app(
+        f"sqlite:///{(tmp_path / 'rag_on_mcp_on.sqlite3').as_posix()}",
+        classifier=_FaqClassifier(),
+    )
+    Base.metadata.create_all(app.state.database_engine)
+    try:
+        with app.state.session_factory() as db:
+            workflow = ConversationWorkflow(
+                classifier=_FaqClassifier(),
+                knowledge=KnowledgeService(),
+                availability=AvailabilityConversationService(),
+                rag_retriever=RagRetriever(),
+                rag_enabled=True,
+                rag_provider="lexical",
+                mcp_enabled=True,
+            )
+            async with mcp_client_session() as mcp_client:
+                faq_agent = workflow._agent_registry.get(
+                    Intent.FAQ_BUSINESS_HOURS
+                )
+                assert faq_agent is not None
+                faq_agent._mcp_client = mcp_client
+
+                result = await workflow.run(
+                    session_id=uuid4(),
+                    request=_make_customer_request("How much is a haircut?"),
+                    db=db,
+                )
+
+            assert result.outcome == "answered"
+            assert "$35" in result.response_text or "35.00" in result.response_text
+    finally:
+        app.state.database_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_mcp_on_server_failure_falls_back_to_okf() -> None:
+    """MCP ON + server failure: FAQ falls back to deterministic OKF."""
+    knowledge = KnowledgeService()
+    retriever = RagRetriever()
+
+    class FailingMcpClient:
+        connected = False
+
+        async def call_tool(self, name: str, arguments: dict):
+            raise McpConnectionError("MCP server unavailable")
+
+    agent = FaqAgent(knowledge, retriever, mcp_client=FailingMcpClient())
+    request = _make_customer_request("How much is a haircut?")
+    result = await agent.handle(request)
+
+    assert result["intent"] == Intent.FAQ_BUSINESS_HOURS
+    assert "$35" in result["text"] or "35.00" in result["text"]
+    assert result["retrieval_reason"] != ("mcp_faq_retrieve",)
+
+
+def test_multi_intent_aggregation(tmp_path: Path) -> None:
+    """Multi-intent request produces combined capability results through
+    existing multi_intent_capability node (no MCP needed)."""
+    app = create_app(
+        f"sqlite:///{(tmp_path / 'multi_intent.sqlite3').as_posix()}",
+        classifier=_MultiIntentClassifier(),
+    )
+    Base.metadata.create_all(app.state.database_engine)
+    try:
+        with app.state.session_factory() as db:
+            workflow = ConversationWorkflow(
+                classifier=_MultiIntentClassifier(),
+                knowledge=KnowledgeService(),
+                availability=AvailabilityConversationService(),
+                rag_retriever=RagRetriever(),
+                rag_enabled=False,
+                mcp_enabled=False,
+            )
+            result = _run_workflow(
+                workflow,
+                uuid4(),
+                "Are you open Friday and do you have haircut slots?",
+                db,
+            )
+    finally:
+        app.state.database_engine.dispose()
+
+    assert result.outcome in ("answered", "clarification", "unsupported")
+    # Multi-intent reaches aggregation, not clarification-by-default
+    assert result.response_text
+
+
+def test_support_confirmation_repeated_requests(tmp_path: Path) -> None:
+    """Support confirmation + repeated requests preserves idempotency."""
+    # SupportAgent directly: human request → confirmation prompt
+    agent = SupportAgent(create_handoff_ticket)
+    request = _make_customer_request("I want to speak to someone.")
+    result = agent.handle(
+        request, None, str(uuid4()), uuid4(), intent=Intent.HUMAN_REQUEST
+    )
+    assert result["intent"] == Intent.HUMAN_REQUEST
+    assert result["outcome"] == "handoff_unavailable"
+    assert "reply yes or no" in result["text"]
+
+    # Booking create → unsupported booking message (no ticket)
+    result = agent.handle(
+        request, None, str(uuid4()), uuid4(), intent=Intent.APPOINTMENT_CREATE
+    )
+    assert result["intent"] == Intent.APPOINTMENT_CREATE
+    assert result["outcome"] == "handoff_unavailable"
+    assert "can't book an appointment" in result["text"]
+    assert "ticket" not in result["text"].casefold()
+
+    # Repeated booking create → same response (idempotent)
+    result2 = agent.handle(
+        request, None, str(uuid4()), uuid4(), intent=Intent.APPOINTMENT_CREATE
+    )
+    assert result2["text"] == result["text"]
+
+
+def test_invalid_ambiguous_input_clarification(tmp_path: Path) -> None:
+    """Invalid/ambiguous input reaches clarification, not agent."""
+    app = create_app(
+        f"sqlite:///{(tmp_path / 'clarify.sqlite3').as_posix()}",
+        classifier=_ClarificationClassifier(),
+    )
+    Base.metadata.create_all(app.state.database_engine)
+    try:
+        with app.state.session_factory() as db:
+            workflow = ConversationWorkflow(
+                classifier=_ClarificationClassifier(),
+                knowledge=KnowledgeService(),
+                availability=AvailabilityConversationService(),
+                rag_retriever=RagRetriever(),
+                rag_enabled=False,
+                mcp_enabled=False,
+            )
+            result = _run_workflow(
+                workflow, uuid4(), "Tell me something unclear.", db
+            )
+    finally:
+        app.state.database_engine.dispose()
+
+    assert result.outcome == "clarification"

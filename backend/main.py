@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from backend.availability import AvailabilityConversationService
 from backend.channels import ChannelType, CustomerRequest
+from backend.chunker import load_approved_chunks
 from backend.database import (
     Base,
     create_database_engine,
