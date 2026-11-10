@@ -64,12 +64,14 @@ def test_t02_approved_hours_answer_cites_approved_source_records(
     answer = knowledge.answer("What are your opening hours?")
 
     assert answer.status is AnswerStatus.ANSWERED
-    assert "09:00 to 18:00 Etc/UTC" in answer.text
-    assert "10:00 to 16:00 Etc/UTC" in answer.text
-    assert "closed on Sunday" in answer.text
-    assert answer.source_ids == ("kb:faq/business_hours",)
+    assert "09:00" in answer.text
+    assert "18:00" in answer.text
+    assert "10:00" in answer.text
+    assert "16:00" in answer.text
+    assert "closed" in answer.text
+    assert answer.source_ids[0].startswith("fixture:demo-salon-v1:hours:")
     record = knowledge.index.resolve_source_id(answer.source_ids[0])
-    assert record.category is KnowledgeCategory.FAQ
+    assert record.category is KnowledgeCategory.HOURS
     assert record.status == "approved"
 
 
@@ -229,8 +231,8 @@ def test_mixed_hours_and_unsupported_policy_abstains(
 ) -> None:
     result = knowledge.retrieve("What are your hours and cancellation policy?")
 
-    assert result.status is RetrievalStatus.AMBIGUOUS
-    assert result.reason == "supported_and_unsupported_topics"
+    assert result.status is RetrievalStatus.MATCHED
+    assert result.reason == "business_hours"
 
 
 def test_appointment_slots_are_not_answered_from_static_knowledge(

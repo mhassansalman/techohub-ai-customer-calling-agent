@@ -169,13 +169,21 @@ class KnowledgeIndex:
         if not tokens:
             return _unsupported("empty_query")
 
+        # Check hours FIRST so that hour-specific queries return day-specific
+        # hours rather than general FAQ responses about hours.
+        has_hours_topic = bool(tokens & _HOURS_TERMS)
+        if has_hours_topic:
+            days = _requested_days(tokens, fixture)
+            if days is None:
+                return _ambiguous("multiple_or_conflicting_days")
+            return _hours_result(self.records, days)
+
         matched_faqs = _match_faq_records(self.records, query)
         if len(matched_faqs) > 1:
             return _ambiguous("multiple_approved_faqs")
         if matched_faqs:
             return _matched("approved_faq", matched_faqs)
 
-        has_hours_topic = bool(tokens & _HOURS_TERMS)
         service_matches = _match_services(self.records, query)
         has_service_topic = bool(tokens & _SERVICE_QUESTION_TERMS) or bool(
             service_matches
@@ -189,14 +197,6 @@ class KnowledgeIndex:
 
         if has_hours_topic and has_service_topic:
             return _ambiguous("hours_and_service_topics")
-        if has_hours_topic:
-            if _has_booking_terms(tokens):
-                return _unsupported("appointment_slots_require_booking_provider")
-            days = _requested_days(tokens, fixture)
-            if days is None:
-                return _ambiguous("multiple_or_conflicting_days")
-            return _hours_result(self.records, days)
-
         if has_service_topic:
             if _has_booking_terms(tokens):
                 return _unsupported("appointment_slots_require_booking_provider")

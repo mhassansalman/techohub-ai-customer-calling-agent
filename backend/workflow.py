@@ -56,6 +56,112 @@ HANDOFF_CONFLICT_PROMPT = (
     "I heard both yes and no. Would you like me to create a support ticket?"
 )
 
+# Conversational intent patterns - small-talk and status queries that are
+# answered directly without invoking the LangGraph capability graph.  These are
+# only matched when the message contains no business keywords, so mixed
+# requests (e.g. "hello what's the price of a haircut") still route through
+# the normal capability nodes.
+_GREETING_PHRASES = frozenset(
+    {
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "good day",
+        "greetings",
+    }
+)
+_GREETING_WORDS = frozenset({"hello", "hi", "hey", "howdy", "hiya"})
+
+_THANKS_PHRASES = frozenset(
+    {"thank you", "thank you very much", "thanks a lot", "thankyou"}
+)
+_THANKS_WORDS = frozenset({"thanks", "thx", "ty"})
+
+_ACKNOWLEDGEMENT_PHRASES = frozenset({"copy that", "got it", "gotcha"})
+_ACKNOWLEDGEMENT_WORDS = frozenset(
+    {"okay", "ok", "alright", "alrighty", "roger", "understood"}
+)
+
+_IDENTITY_PHRASES = frozenset(
+    {
+        "who are you",
+        "what are you",
+        "are you a bot",
+        "are you an assistant",
+        "what is your name",
+        "who is this",
+        "what is this",
+    }
+)
+
+_LISTENING_PHRASES = frozenset(
+    {
+        "are you listening",
+        "can you hear me",
+        "are you there",
+        "hello are you there",
+        "can you hear me now",
+    }
+)
+
+_SECRET_PHRASES = frozenset(
+    {
+        "api key",
+        "secret key",
+        "access key",
+        "your api key",
+        "tell me your key",
+    }
+)
+_SECRET_WORDS = frozenset({"password", "credentials", "private key"})
+
+# Business keywords that indicate the user is making a service request rather
+# than purely chatting.  If any of these appear, the message is routed through
+# the normal LangGraph capability nodes instead of being treated as
+# conversational small-talk.
+_BUSINESS_MARKERS = frozenset(
+    {
+        "appointment",
+        "appointments",
+        "booking",
+        "book",
+        "schedule",
+        "reschedule",
+        "cancel",
+        "change",
+        "hours",
+        "open",
+        "opening",
+        "close",
+        "closing",
+        "price",
+        "cost",
+        "duration",
+        "how much",
+        "service",
+        "services",
+        "availability",
+        "slot",
+        "slots",
+        "account",
+        "history",
+        "complaint",
+        "issue",
+        "problem",
+        "refund",
+        "support",
+        "human",
+        "staff",
+        "agent",
+        "talk",
+        "speak",
+        "connect",
+        "transfer",
+        "haircut",
+        "beard",
+    }
+)
+
 
 class CapabilityResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -223,6 +329,14 @@ class ConversationWorkflow:
                         classification_source=ClassifierSource.RULES,
                         outcome="clarification",
                     )
+
+            conversational = _conversational_response(request.message_text)
+            if conversational is not None:
+                return ConversationWorkflowResult(
+                    response_text=conversational,
+                    classification_source=ClassifierSource.RULES,
+                    outcome="answered",
+                )
 
             if _is_short_acknowledgment(request.message_text):
                 return ConversationWorkflowResult(
@@ -650,20 +764,36 @@ class ConversationWorkflow:
                     if has_hours_and_compound_intent
                     else text
                 )
+                answer = self.knowledge.answer(query)
+                if len(classification.intents) > 1:
+                    answer = KnowledgeAnswer(
+                        text=_trim_multi_intent_faq_response(answer.text),
+                        status=answer.status,
+                        reason=answer.reason,
+                        source_ids=answer.source_ids,
+                    )
                 results.append(
-                    _knowledge_result(intent, self.knowledge.answer(query))
+                    _knowledge_result(intent, answer)
                 )
             elif intent is Intent.FAQ_SERVICE_POLICY:
+                answer = self.knowledge.answer(
+                    _service_query(
+                        classification.entities.service_id,
+                        self.knowledge,
+                        text,
+                    )
+                )
+                if len(classification.intents) > 1:
+                    answer = KnowledgeAnswer(
+                        text=_trim_multi_intent_faq_response(answer.text),
+                        status=answer.status,
+                        reason=answer.reason,
+                        source_ids=answer.source_ids,
+                    )
                 results.append(
                     _knowledge_result(
                         intent,
-                        self.knowledge.answer(
-                            _service_query(
-                                classification.entities.service_id,
-                                self.knowledge,
-                                text,
-                            )
-                        ),
+                        answer,
                     )
                 )
             elif intent in {
@@ -884,6 +1014,68 @@ def _is_short_acknowledgment(text: str) -> bool:
     return _handoff_confirmation_decision(text) in {"confirm", "reject"}
 
 
+def _conversational_response(text: str) -> str | None:
+    """Return a conversational response for small-talk / status queries, or
+    None if the message is not purely conversational (e.g. it contains business
+    keywords and should be routed through the normal capability graph).
+
+    These responses are deterministic and require no LLM or knowledge lookup.
+    """
+    import re
+
+    normalized = text.casefold().strip()
+    tokens = set(re.findall(r"[a-z0-9]+", normalized))
+
+    # If any business keyword is present, this is not purely conversational.
+    if tokens & _BUSINESS_MARKERS:
+        return None
+
+    words = normalized.split()
+
+    # Multi-word phrase matches (checked first so longer phrases win).
+    for phrase in _THANKS_PHRASES:
+        if phrase in normalized:
+            phrase_words = set(phrase.split())
+            if phrase_words.issubset(tokens) and len(words) <= len(phrase_words) + 2:
+                return "You're welcome! Anything else I can help with?"
+    for phrase in _GREETING_PHRASES:
+        if phrase in normalized:
+            phrase_words = set(phrase.split())
+            if phrase_words.issubset(tokens) and len(words) <= len(phrase_words) + 2:
+                return "Hello! How can I help you today?"
+    for phrase in _IDENTITY_PHRASES:
+        if phrase in normalized:
+            phrase_words = set(phrase.split())
+            if phrase_words.issubset(tokens) and len(words) <= len(phrase_words) + 2:
+                return "I'm TECHOHUB's automated assistant."
+    for phrase in _LISTENING_PHRASES:
+        if phrase in normalized:
+            phrase_words = set(phrase.split())
+            if phrase_words.issubset(tokens) and len(words) <= len(phrase_words) + 2:
+                return "Yes, I'm here. How can I help you?"
+    for phrase in _SECRET_PHRASES:
+        if phrase in normalized:
+            phrase_words = set(phrase.split())
+            if phrase_words.issubset(tokens) and len(words) <= len(phrase_words) + 2:
+                return "I can't share private API keys or credentials."
+
+    # Single-word matches (only for short messages).
+    if len(tokens) <= 3:
+        for word in tokens:
+            if word in _GREETING_WORDS:
+                return "Hello! How can I help you today?"
+            if word in _THANKS_WORDS:
+                return "You're welcome! Anything else I can help with?"
+            if word in _ACKNOWLEDGEMENT_WORDS:
+                return "Great! What else can I help with?"
+
+    # Secret keywords as single words.
+    if tokens & _SECRET_WORDS:
+        return "I can't share private API keys or credentials."
+
+    return None
+
+
 def _support_result(
     intent: Intent,
     text: str,
@@ -967,6 +1159,41 @@ def _hours_query(requested_date: str | None) -> str:
     except ValueError:
         day = requested_date
     return f"What are the opening hours on {day}?"
+
+
+def _trim_multi_intent_faq_response(text: str) -> str:
+    """Trim a FAQ response to only the essential fact for multi-intent responses.
+
+    Preserves source IDs and retrieval reasons (handled separately on the
+    CapabilityResult) while removing unrelated detail (e.g. duration when only
+    price was asked) and demo-salon provenance prefixes.
+
+    For service answers like "A haircut costs $35 and takes about 30 minutes.",
+    splits at " and " to keep only the core fact.  For hours answers like
+    "Demo Salon is closed on Sunday.", replaces the demo-salon prefix with
+    "We're" for a more natural tone.
+    """
+    import re
+
+    # For service answers like "A haircut costs $35 and takes about 30 minutes.",
+    # split at " and " only when the text contains a price (to avoid splitting
+    # hours responses like "Monday through Friday from 09:00 to 18:00, and on
+    # Saturday from 10:00 to 16:00 Etc/UTC").
+    if " and " in text and re.search(r"\$[\d,.]", text):
+        first_part = text.split(" and ", 1)[0]
+        if not first_part.endswith("."):
+            first_part = first_part + "."
+        return first_part
+    # Otherwise, take the first sentence.
+    first_sentence = text.split(". ")[0]
+    if not first_sentence.endswith("."):
+        first_sentence = first_sentence + "."
+    # Remove "Demo Salon is/are " prefix and replace with "We're ".
+    if first_sentence.startswith("Demo Salon is "):
+        first_sentence = "We're " + first_sentence[len("Demo Salon is "):]
+    elif first_sentence.startswith("Demo Salon are "):
+        first_sentence = "We're " + first_sentence[len("Demo Salon are "):]
+    return first_sentence
 
 
 def _service_query(

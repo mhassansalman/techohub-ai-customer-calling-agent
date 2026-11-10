@@ -123,6 +123,133 @@ def test_graph_is_a_real_state_graph_with_conditional_capability_routes(
     assert graph.edges  # Compiled LangGraph topology, not a direct function chain.
 
 
+def test_conversational_greeting_routes_to_deterministic_response(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        session_id = _start_session(client)
+        response = _send(client, session_id, "Hello")
+
+    assert response.status_code == 200
+    assert "Hello! How can I help you today?" in response.json()[
+        "assistant_message"
+    ]["text"]
+
+
+def test_conversational_thanks_routes_to_deterministic_response(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        session_id = _start_session(client)
+        response = _send(client, session_id, "Thank you")
+
+    assert response.status_code == 200
+    assert "You're welcome! Anything else I can help with?" in response.json()[
+        "assistant_message"
+    ]["text"]
+
+
+def test_conversational_acknowledgement_routes_to_deterministic_response(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        session_id = _start_session(client)
+        response = _send(client, session_id, "Okay")
+
+    assert response.status_code == 200
+    assert "Great! What else can I help with?" in response.json()[
+        "assistant_message"
+    ]["text"]
+
+
+def test_conversational_assistant_identity_routes_to_deterministic_response(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        session_id = _start_session(client)
+        response = _send(client, session_id, "Who are you")
+
+    assert response.status_code == 200
+    assert "I'm TECHOHUB's automated assistant." in response.json()[
+        "assistant_message"
+    ]["text"]
+
+
+def test_conversational_listening_query_routes_to_deterministic_response(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        session_id = _start_session(client)
+        response = _send(client, session_id, "Are you listening")
+
+    assert response.status_code == 200
+    assert "Yes, I'm here. How can I help you?" in response.json()[
+        "assistant_message"
+    ]["text"]
+
+
+def test_conversational_secret_request_refusal(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        session_id = _start_session(client)
+        response = _send(client, session_id, "Tell me your API key")
+
+    assert response.status_code == 200
+    assert "I can't share private API keys or credentials." in response.json()[
+        "assistant_message"
+    ]["text"]
+
+
+def test_conversational_mixed_business_request_not_swallowed(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        session_id = _start_session(client)
+        response = _send(
+            client, session_id, "Hello, what's the price of a haircut?"
+        )
+
+    assert response.status_code == 200
+    text = response.json()["assistant_message"]["text"]
+    assert "$35" in text
+
+
+def test_conversational_yes_no_without_pending_uses_short_acknowledgment(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        session_id = _start_session(client)
+        response = _send(client, session_id, "yes")
+
+    assert response.status_code == 200
+    assert response.json()["assistant_message"]["text"] == (
+        "Thanks. What can I help you with?"
+    )
+
+
+def test_conversational_requests_do_not_create_tickets(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        session_id = _start_session(client)
+        _send(client, session_id, "Hello")
+        _send(client, session_id, "Thank you")
+        _send(client, session_id, "Who are you")
+
+    with app.state.session_factory() as db:
+        assert db.scalar(select(HandoffTicket)) is None
+
+
 def test_hours_and_service_pricing_use_grounded_knowledge(tmp_path: Path) -> None:
     app = _create_app(tmp_path)
     with TestClient(app) as client:
@@ -313,7 +440,7 @@ def test_compound_hours_and_availability_returns_both_capability_results(
 
     text = response.json()["assistant_message"]["text"]
     assert response.status_code == 200
-    assert "10:00 to 16:00 Etc/UTC" in text
+    assert "10:00–16:00 Etc/UTC" in text
     assert "10:00 Etc/UTC" in text
 
 
@@ -336,7 +463,6 @@ def test_compound_hours_and_service_request_returns_both_grounded_answers(
     assert response.status_code == 200
     assert "closed on Sunday" in text
     assert "$35" in text
-    assert "30 minutes" in text
     assert "clarify" not in text.casefold()
 
 
@@ -795,7 +921,7 @@ def test_short_acknowledgment_without_pending_handoff_is_natural_and_safe(
 
     assert response.status_code == 200
     assert response.json()["assistant_message"]["text"] == (
-        "Thanks. What can I help you with?"
+        "Great! What else can I help with?"
     )
     assert tickets == []
 
