@@ -229,11 +229,23 @@ class FaqAgent:
     For complex FAQ tasks involving multiple services or days, the agent
     performs multiple lookups and combines the grounded results, preserving
     source IDs and retrieval reasons. It abstains from unsupported claims.
+
+    When an MCP client is provided and connected, single-service FAQ
+    lookups are routed through the MCP server's ``faq_retrieve`` tool,
+    exercising the real MCP protocol. Multi-service lookups continue to
+    use direct domain-service calls. If the MCP client is unavailable,
+    the agent falls back to deterministic OKF retrieval.
     """
 
-    def __init__(self, knowledge: KnowledgeService, retriever: RagRetriever) -> None:
+    def __init__(
+        self,
+        knowledge: KnowledgeService,
+        retriever: RagRetriever,
+        mcp_client: object | None = None,
+    ) -> None:
         self._knowledge = knowledge
         self._retriever = retriever
+        self._mcp_client = mcp_client
 
     def _lookup(self, text: str) -> KnowledgeAnswer:
         # Try semantic retrieval first, fall back to lexical, then OKF.
@@ -242,13 +254,14 @@ class FaqAgent:
             return answer
         return self._knowledge.answer(text)
 
-    def handle(self, request: CustomerRequest) -> dict:
+    async def handle(self, request: CustomerRequest) -> dict:
         text = request.message_text
         service_ids = mentioned_service_ids(
             text, load_demo_salon_fixture().services
         )
 
-        # Multi-service FAQ: look up each service and combine.
+        # Multi-service FAQ: look up each service and combine using
+        # direct domain-service calls (MCP faq_retrieve handles single queries).
         if len(service_ids) > 1:
             results: list[KnowledgeAnswer] = []
             for service_id in service_ids:
@@ -263,9 +276,6 @@ class FaqAgent:
                 if service is None:
                     continue
                 query = f"What is the price and duration of {service.name}?"
-                # Use OKF directly for individual service lookups so the
-                # retriever cannot conflate the combined service with
-                # individual service facts.
                 answer = self._knowledge.answer(query)
                 results.append(answer)
 
@@ -307,7 +317,30 @@ class FaqAgent:
                 ),
             }
 
-        # Single-service FAQ (existing behavior).
+        # Single-service FAQ: route through MCP client if available.
+        if self._mcp_client is not None and self._mcp_client.connected:
+            try:
+                mcp_result = await self._mcp_client.call_tool(
+                    "faq_retrieve", {"query": text}
+                )
+                if not mcp_result.get("is_error"):
+                    structured = mcp_result.get("structured") or {}
+                    return {
+                        "intent": Intent.FAQ_BUSINESS_HOURS,
+                        "text": mcp_result["content"],
+                        "source_ids": tuple(
+                            structured.get("source_ids", ())
+                        ),
+                        "outcome": "answered"
+                        if structured.get("status") == "answered"
+                        else "unsupported",
+                        "retrieval_reason": ("mcp_faq_retrieve",),
+                    }
+            except Exception:
+                # MCP failure: fall through to deterministic OKF path.
+                pass
+
+        # Single-service FAQ (existing behavior, also MCP fallback).
         answer = self._lookup(text)
         if answer.status.value == "answered":
             return {

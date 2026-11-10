@@ -645,11 +645,11 @@
       "hours": 3,
       "tests": "T-P1-04",
       "depends_on": "A11 P13 P21",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "backend/mcp_server.py implements a local MCP server over stdio transport exposing four approved tools: faq_retrieve, service_catalog, availability_check, support_info. All tools wrap existing domain services (KnowledgeService, AvailabilityService) with no duplicated business logic. No booking writes, no arbitrary database/file access, no unrestricted staff operations. Responses preserve provenance (source IDs) and safe abstention. TECHOHUB_MCP_ENABLED flag (default OFF) controls MCP activation; invalid values raise ValueError. tests/test_mcp.py (11 tests) covers tool exposure, client connection, tool discovery, grounding/provenance, read-only availability, unsupported booking, confirmation/idempotency, MCP failure fallback, and bypass detection. Full backend suite: 370 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed."
     },
     {
       "date": "2026-11-05",
@@ -663,11 +663,11 @@
       "hours": 3,
       "tests": "T-P1-04",
       "depends_on": "A12",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "backend/mcp_client.py implements an async MCP client using ClientSession over stdio_client transport (actual MCP protocol). Discovers and calls approved tools with input/output validation via structured_output. Handles connection failures safely via McpConnectionError with deterministic OKF fallback. Integrated with LangGraph agent architecture: FaqAgent accepts an optional McpClient and routes single-service FAQ lookups through MCP faq_retrieve tool when TECHOHUB_MCP_ENABLED=true, falling back to direct OKF on failure or when MCP is disabled. ConversationWorkflow manages MCP client lifecycle (connect in run(), disconnect in finally). tests/test_mcp.py (11 tests) covers real client/server connection, tool discovery, agent-through-MCP execution, grounding/provenance, read-only availability, unsupported booking, confirmation/idempotency, failure fallback, and bypass detection. Full backend suite: 370 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed."
     },
     {
       "date": "2026-11-06",

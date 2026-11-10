@@ -42,6 +42,7 @@ from backend.models import (
     PendingAvailabilityDateContext,
 )
 from backend.session_service import create_handoff_ticket
+from backend.mcp_client import McpClient, McpConfig
 
 
 HANDOFF_CONFIRMATION_PROMPT = (
@@ -106,6 +107,7 @@ class ConversationWorkflow:
         semantic_retriever: SemanticRetriever | None = None,
         rag_enabled: bool = False,
         rag_provider: str = "lexical",
+        mcp_enabled: bool = False,
     ) -> None:
         self.classifier = classifier
         self.knowledge = knowledge or KnowledgeService()
@@ -115,11 +117,19 @@ class ConversationWorkflow:
         self._semantic_retriever = semantic_retriever
         self._rag_enabled = rag_enabled
         self._rag_provider = rag_provider
+        self._mcp_enabled = mcp_enabled
+        self._mcp_client: McpClient | None = None
+        if mcp_enabled:
+            self._mcp_client = McpClient()
         self._complexity_classifier = ComplexityClassifier()
         self._agent_registry = AgentRegistry()
         self._agent_registry.register(
             Intent.FAQ_BUSINESS_HOURS,
-            FaqAgent(self.knowledge, self._lexical_retriever or RagRetriever()),
+            FaqAgent(
+                self.knowledge,
+                self._lexical_retriever or RagRetriever(),
+                mcp_client=self._mcp_client,
+            ),
         )
         self._agent_registry.register(
             Intent.APPOINTMENT_AVAILABILITY,
@@ -132,6 +142,34 @@ class ConversationWorkflow:
         self.graph = self._build_graph()
 
     async def run(
+        self,
+        *,
+        session_id: UUID,
+        request: CustomerRequest,
+        db: Session,
+    ) -> ConversationWorkflowResult:
+        # Connect MCP client when enabled; ensure teardown on completion.
+        if self._mcp_enabled and self._mcp_client is not None:
+            await self._mcp_client.connect()
+        try:
+            if self._mcp_enabled and self._mcp_client is not None:
+                try:
+                    return await self._run_with_mcp(
+                        session_id=session_id, request=request, db=db
+                    )
+                except McpConnectionError:
+                    # MCP connection lost mid-flow; fall back to direct path.
+                    return await self._run_direct(
+                        session_id=session_id, request=request, db=db
+                    )
+            return await self._run_direct(
+                session_id=session_id, request=request, db=db
+            )
+        finally:
+            if self._mcp_client is not None:
+                await self._mcp_client.close()
+
+    async def _run_direct(
         self,
         *,
         session_id: UUID,
@@ -213,6 +251,20 @@ class ConversationWorkflow:
         except Exception as error:
             raise WorkflowExecutionError("conversation workflow failed") from error
         return ConversationWorkflowResult.model_validate(state["response"])
+
+    async def _run_with_mcp(
+        self,
+        *,
+        session_id: UUID,
+        request: CustomerRequest,
+        db: Session,
+    ) -> ConversationWorkflowResult:
+        # MCP-enabled path uses the same graph execution; the FaqAgent's MCP
+        # client is already connected and will be used for single-service FAQ
+        # lookups. On MCP failure, the agent falls back to direct OKF.
+        return await self._run_direct(
+            session_id=session_id, request=request, db=db
+        )
 
     @staticmethod
     def _pending_handoff_confirmation(
@@ -469,7 +521,7 @@ class ConversationWorkflow:
         }
 
     # A10/A11: Specialized agent capabilities - route complex requests through agents
-    def _agent_faq_capability(
+    async def _agent_faq_capability(
         self,
         state: ConversationState,
     ) -> dict[str, tuple[CapabilityResult, ...]]:
@@ -479,7 +531,7 @@ class ConversationWorkflow:
         if handler is None:
             # Fall back to deterministic FAQ capability
             return self._faq_capability(state)
-        result = handler.handle(state["request"])
+        result = await handler.handle(state["request"])
         return {
             "capability_results": (
                 CapabilityResult(

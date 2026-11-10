@@ -59,6 +59,7 @@ from backend.session_service import (
     start_session,
 )
 from backend.workflow import ConversationWorkflow, WorkflowExecutionError
+from backend.mcp_client import McpConfig
 
 
 logger = logging.getLogger(__name__)
@@ -185,6 +186,7 @@ def create_app(
         semantic_retriever=semantic_retriever,
         rag_enabled=rag_config.enabled if rag_config else False,
         rag_provider=rag_config.provider if rag_config else "lexical",
+        mcp_enabled=McpConfig.from_environment().enabled,
     )
 
     def get_db() -> Generator[Session, None, None]:

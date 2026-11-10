@@ -108,7 +108,7 @@ def test_faq_agent_uses_knowledge_service() -> None:
     agent = FaqAgent(knowledge, retriever)
 
     request = _make_customer_request("How much is a haircut?")
-    result = agent.handle(request)
+    result = asyncio.run(agent.handle(request))
     assert result["intent"] == Intent.FAQ_BUSINESS_HOURS
     assert result["source_ids"]
     assert result["outcome"] == "answered"
@@ -278,7 +278,7 @@ def test_agent_faq_node_produces_capability_result() -> None:
         )(),
         "request": request,
     }
-    output = workflow._agent_faq_capability(state)
+    output = asyncio.run(workflow._agent_faq_capability(state))
     capability_result = output["capability_results"][0]
     assert capability_result.intent == Intent.FAQ_BUSINESS_HOURS
     assert capability_result.source_ids
