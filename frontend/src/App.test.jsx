@@ -391,18 +391,22 @@ describe("Call-Only experience", () => {
     render(<App />);
     await waitForCallOnlyReady();
 
-    voice.recognitions[0].onerror({ error: "no-speech" });
+    voice.recognitions[0].onerror?.({ error: "no-speech" });
     voice.recognitions[0].onend();
     await waitFor(() => expect(voice.recognitions).toHaveLength(2));
-    voice.recognitions[1].onerror({ error: "no-speech" });
+    voice.recognitions[1].onerror?.({ error: "no-speech" });
     voice.recognitions[1].onend();
+    await waitFor(() => expect(voice.recognitions).toHaveLength(3));
+    voice.recognitions[2].onerror?.({ error: "no-speech" });
+    voice.recognitions[2].onend();
+    await waitFor(() => expect(voice.recognitions).toHaveLength(3));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "No speech was recognized. Please speak again",
+      "No speech was recognized. Please speak again or type your message.",
     );
-    expect(voice.recognitions).toHaveLength(2);
+    expect(voice.recognitions).toHaveLength(3);
     await userEvent.setup().click(screen.getByRole("button", { name: "Retry listening" }));
-    await waitFor(() => expect(voice.recognitions).toHaveLength(3));
+    await waitFor(() => expect(voice.recognitions).toHaveLength(4));
   });
 
   it("cleans up speech on End Call, ignores stale TTS, and starts a fresh session", async () => {
@@ -1984,11 +1988,16 @@ describe("UX06 English voice recognition reliability", () => {
 
     voice.recognitions[1].onerror?.({ error: "no-speech" });
     voice.recognitions[1].onend();
+    await waitFor(() => expect(voice.recognitions).toHaveLength(3));
+
+    voice.recognitions[2].onerror?.({ error: "no-speech" });
+    voice.recognitions[2].onend();
+    await waitFor(() => expect(voice.recognitions).toHaveLength(4));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "No speech was recognized. Please speak again or type your message.",
     );
-    expect(voice.recognitions).toHaveLength(2);
+    expect(voice.recognitions).toHaveLength(4);
     expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(0);
   });
 });

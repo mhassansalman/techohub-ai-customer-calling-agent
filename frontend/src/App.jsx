@@ -799,7 +799,7 @@ export default function App() {
         }
 
         if (!recognitionFailed || recognitionErrorCode === "no-speech") {
-          if (liveCallNoSpeechRecoveryCountRef.current < 1) {
+          if (liveCallNoSpeechRecoveryCountRef.current < 3) {
             liveCallNoSpeechRecoveryCountRef.current += 1;
             liveCallStartRequestedRef.current = true;
             updateVoiceFeedback("No speech was recognized. Listening again.");

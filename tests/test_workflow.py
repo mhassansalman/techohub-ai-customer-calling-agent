@@ -146,9 +146,7 @@ def test_conversational_thanks_routes_to_deterministic_response(
         response = _send(client, session_id, "Thank you")
 
     assert response.status_code == 200
-    assert "You're welcome! Anything else I can help with?" in response.json()[
-        "assistant_message"
-    ]["text"]
+    assert "You're welcome!" in response.json()["assistant_message"]["text"]
 
 
 def test_conversational_acknowledgement_routes_to_deterministic_response(
@@ -160,9 +158,7 @@ def test_conversational_acknowledgement_routes_to_deterministic_response(
         response = _send(client, session_id, "Okay")
 
     assert response.status_code == 200
-    assert "Great! What else can I help with?" in response.json()[
-        "assistant_message"
-    ]["text"]
+    assert "Sure." in response.json()["assistant_message"]["text"]
 
 
 def test_conversational_assistant_identity_routes_to_deterministic_response(
@@ -231,9 +227,7 @@ def test_conversational_yes_no_without_pending_uses_short_acknowledgment(
         response = _send(client, session_id, "yes")
 
     assert response.status_code == 200
-    assert response.json()["assistant_message"]["text"] == (
-        "Thanks. What can I help you with?"
-    )
+    assert response.json()["assistant_message"]["text"] == "Sure."
 
 
 def test_conversational_requests_do_not_create_tickets(

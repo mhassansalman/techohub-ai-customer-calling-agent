@@ -68,6 +68,9 @@ _GREETING_PHRASES = frozenset(
         "good evening",
         "good day",
         "greetings",
+        "goodbye",
+        "good bye",
+        "bye",
     }
 )
 _GREETING_WORDS = frozenset({"hello", "hi", "hey", "howdy", "hiya"})
@@ -77,9 +80,11 @@ _THANKS_PHRASES = frozenset(
 )
 _THANKS_WORDS = frozenset({"thanks", "thx", "ty"})
 
-_ACKNOWLEDGEMENT_PHRASES = frozenset({"copy that", "got it", "gotcha"})
+_ACKNOWLEDGEMENT_PHRASES = frozenset(
+    {"copy that", "got it", "gotcha"}
+)
 _ACKNOWLEDGEMENT_WORDS = frozenset(
-    {"okay", "ok", "alright", "alrighty", "roger", "understood"}
+    {"okay", "ok", "alright", "alrighty", "roger", "understood", "yes", "no"}
 )
 
 _IDENTITY_PHRASES = frozenset(
@@ -1037,11 +1042,13 @@ def _conversational_response(text: str) -> str | None:
         if phrase in normalized:
             phrase_words = set(phrase.split())
             if phrase_words.issubset(tokens) and len(words) <= len(phrase_words) + 2:
-                return "You're welcome! Anything else I can help with?"
+                return "You're welcome!"
     for phrase in _GREETING_PHRASES:
         if phrase in normalized:
             phrase_words = set(phrase.split())
             if phrase_words.issubset(tokens) and len(words) <= len(phrase_words) + 2:
+                if phrase in ("goodbye", "good bye", "bye"):
+                    return "Goodbye! Have a great day."
                 return "Hello! How can I help you today?"
     for phrase in _IDENTITY_PHRASES:
         if phrase in normalized:
@@ -1065,9 +1072,9 @@ def _conversational_response(text: str) -> str | None:
             if word in _GREETING_WORDS:
                 return "Hello! How can I help you today?"
             if word in _THANKS_WORDS:
-                return "You're welcome! Anything else I can help with?"
+                return "You're welcome!"
             if word in _ACKNOWLEDGEMENT_WORDS:
-                return "Great! What else can I help with?"
+                return "Sure."
 
     # Secret keywords as single words.
     if tokens & _SECRET_WORDS:
