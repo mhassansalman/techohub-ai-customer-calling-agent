@@ -236,7 +236,7 @@ class KnowledgeService:
         return self.index.retrieve(query, fixture=self.fixture)
 
     def answer(self, query: str) -> KnowledgeAnswer:
-        return compose_answer(self.retrieve(query))
+        return compose_answer(self.retrieve(query), query=query)
 
 
 def build_knowledge_index(
@@ -253,7 +253,7 @@ def build_knowledge_index(
     return KnowledgeIndex(records)
 
 
-def compose_answer(result: RetrievalResult) -> KnowledgeAnswer:
+def compose_answer(result: RetrievalResult, query: str | None = None) -> KnowledgeAnswer:
     if result.status is not RetrievalStatus.MATCHED:
         return KnowledgeAnswer(
             text=_abstention_text(result.reason),
@@ -272,7 +272,7 @@ def compose_answer(result: RetrievalResult) -> KnowledgeAnswer:
         )
 
     if result.reason == "service_catalog":
-        return _compose_service_answer(result.records[0], result.source_ids)
+        return _compose_service_answer(result.records[0], result.source_ids, query=query)
 
     if result.reason == "service_catalog_list":
         return _compose_service_list(result.records)
@@ -697,22 +697,51 @@ def _format_hours_group(records: tuple[KnowledgeRecord, ...]) -> str:
 def _compose_service_answer(
     record: KnowledgeRecord,
     source_ids: tuple[str, ...],
+    query: str | None = None,
 ) -> KnowledgeAnswer:
     name = record.fact("name")
     if record.fact("active") != "true":
         text = f"Sorry, {name.lower()} isn't currently offered."
     else:
         service_name = name[0].lower() + name[1:]
-        text = (
-            f"A {service_name} costs {_format_service_price(record)} and takes "
-            f"about {record.fact('duration_minutes')} minutes."
-        )
+        price = _format_service_price(record)
+        duration = record.fact("duration_minutes")
+        if query is not None:
+            text = _trim_service_answer_to_query(service_name, price, duration, query)
+        else:
+            text = (
+                f"A {service_name} costs {price} and takes about {duration} minutes."
+            )
     return KnowledgeAnswer(
         text=text,
         status=AnswerStatus.ANSWERED,
         reason="service_catalog",
         source_ids=source_ids,
     )
+
+
+def _trim_service_answer_to_query(
+    service_name: str,
+    price: str,
+    duration: str,
+    query: str,
+) -> str:
+    """Compose a concise service answer scoped to what the customer asked.
+
+    A price-focused question ("How much is a haircut?") returns only the price.
+    A duration-focused question ("How long does a haircut take?") returns only
+    the duration. A compound or unfocused question returns both facts.  Source
+    IDs and retrieval reasons are preserved separately on the result, so this
+    only trims the customer-facing text.
+    """
+    tokens = set(_TOKEN.findall(query.casefold()))
+    price_focused = bool(tokens & {"cost", "much", "price", "pricing", "fee", "fees"})
+    duration_focused = bool(tokens & {"long", "take", "duration", "minutes", "time"})
+    if price_focused and not duration_focused:
+        return f"A {service_name} costs {price}."
+    if duration_focused and not price_focused:
+        return f"A {service_name} takes {duration} minutes."
+    return f"A {service_name} costs {price} and takes about {duration} minutes."
 
 
 def _compose_service_list(

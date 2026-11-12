@@ -158,7 +158,10 @@ def test_conversational_acknowledgement_routes_to_deterministic_response(
         response = _send(client, session_id, "Okay")
 
     assert response.status_code == 200
-    assert "Sure." in response.json()["assistant_message"]["text"]
+    assert (
+        response.json()["assistant_message"]["text"]
+        == "Thanks. What can I help you with?"
+    )
 
 
 def test_conversational_assistant_identity_routes_to_deterministic_response(
@@ -227,7 +230,10 @@ def test_conversational_yes_no_without_pending_uses_short_acknowledgment(
         response = _send(client, session_id, "yes")
 
     assert response.status_code == 200
-    assert response.json()["assistant_message"]["text"] == "Sure."
+    assert (
+        response.json()["assistant_message"]["text"]
+        == "Thanks. What can I help you with?"
+    )
 
 
 def test_conversational_requests_do_not_create_tickets(
@@ -254,8 +260,7 @@ def test_hours_and_service_pricing_use_grounded_knowledge(tmp_path: Path) -> Non
     assert hours.status_code == 200
     assert "Saturday, 10:00–16:00 Etc/UTC" in hours.json()["assistant_message"]["text"]
     assert pricing.status_code == 200
-    assert "$35" in pricing.json()["assistant_message"]["text"]
-    assert "30 minutes" in pricing.json()["assistant_message"]["text"]
+    assert pricing.json()["assistant_message"]["text"] == "A haircut costs $35."
 
 
 def test_unsupported_refund_policy_abstains_without_claiming_ticket(
@@ -470,8 +475,7 @@ def test_haircut_price_question_uses_existing_catalog_answer(tmp_path: Path) -> 
         )
 
     text = response.json()["assistant_message"]["text"]
-    assert "$35" in text
-    assert "30 minutes" in text
+    assert text == "A haircut costs $35."
 
 
 def test_slots_without_service_preserve_date_until_service_clarification(
@@ -914,8 +918,9 @@ def test_short_acknowledgment_without_pending_handoff_is_natural_and_safe(
             )
 
     assert response.status_code == 200
-    assert response.json()["assistant_message"]["text"] == (
-        "Great! What else can I help with?"
+    assert (
+        response.json()["assistant_message"]["text"]
+        == "Thanks. What can I help you with?"
     )
     assert tickets == []
 
@@ -1094,8 +1099,7 @@ def test_workflow_faq_flag_off_uses_deterministic_okf(tmp_path: Path) -> None:
         response = _send(client, session_id, "How much is one haircut?")
 
     text = response.json()["assistant_message"]["text"]
-    assert "$35" in text
-    assert "30 minutes" in text
+    assert text == "A haircut costs $35."
 
 
 def test_workflow_faq_flag_on_uses_rag_retriever(

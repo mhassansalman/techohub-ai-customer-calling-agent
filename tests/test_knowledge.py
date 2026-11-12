@@ -88,43 +88,29 @@ def test_pinned_clock_resolves_relative_days_in_utc(
 
 
 @pytest.mark.parametrize(
-    ("query", "service_name", "price", "duration"),
+    ("query", "expected_text"),
     [
-        ("How much is a haircut and how long does it take?", "haircut", "$35", "30"),
-        ("What is the price and duration of a beard trim?", "beard trim", "$18", "20"),
+        (
+            "How much is a haircut and how long does it take?",
+            "A haircut costs $35 and takes about 30 minutes.",
+        ),
         (
             "How much does a haircut and beard trim cost and how long is it?",
-            "haircut and beard trim",
-            "$45",
-            "45",
+            "A haircut and beard trim costs $45 and takes about 45 minutes.",
         ),
-        (
-            "How much is beard trimming?",
-            "beard trim",
-            "$18",
-            "20",
-        ),
-        (
-            "How much is the haircut and beard combo?",
-            "haircut and beard trim",
-            "$45",
-            "45",
-        ),
+        ("How much is beard trimming?", "A beard trim costs $18."),
+        ("How much is the haircut and beard combo?", "A haircut and beard trim costs $45."),
     ],
 )
 def test_service_price_and_duration_are_fixture_grounded(
     knowledge: KnowledgeService,
     query: str,
-    service_name: str,
-    price: str,
-    duration: str,
+    expected_text: str,
 ) -> None:
     answer = knowledge.answer(query)
 
     assert answer.status is AnswerStatus.ANSWERED
-    assert service_name in answer.text.casefold()
-    assert price in answer.text
-    assert f"{duration} minutes" in answer.text
+    assert answer.text == expected_text
     assert len(answer.source_ids) == 1
     record = knowledge.index.resolve_source_id(answer.source_ids[0])
     assert record.status == "approved"
@@ -132,6 +118,34 @@ def test_service_price_and_duration_are_fixture_grounded(
         KnowledgeCategory.FAQ,
         KnowledgeCategory.SERVICE,
     }
+
+
+def test_service_price_query_returns_price_only(knowledge: KnowledgeService) -> None:
+    """A price-focused single-service question returns the price only (UX05)."""
+    answer = knowledge.answer("How much is a haircut?")
+    assert answer.status is AnswerStatus.ANSWERED
+    assert answer.text == "A haircut costs $35."
+    assert answer.source_ids == ("fixture:demo-salon-v1:service:haircut",)
+
+
+def test_service_duration_query_returns_duration_only(
+    knowledge: KnowledgeService,
+) -> None:
+    """A duration-focused single-service question returns the duration only (UX05)."""
+    answer = knowledge.answer("How long does a haircut take?")
+    assert answer.status is AnswerStatus.ANSWERED
+    assert answer.text == "A haircut takes 30 minutes."
+    assert answer.source_ids == ("fixture:demo-salon-v1:service:haircut",)
+
+
+def test_service_general_offer_query_returns_both_facts(
+    knowledge: KnowledgeService,
+) -> None:
+    """A general 'do you offer' service question keeps both price and duration."""
+    answer = knowledge.answer("Do you offer a haircut?")
+    assert answer.status is AnswerStatus.ANSWERED
+    assert answer.text == "A haircut costs $35 and takes about 30 minutes."
+    assert answer.source_ids == ("fixture:demo-salon-v1:service:haircut",)
 
 
 def test_service_catalog_answer_does_not_claim_live_slots(

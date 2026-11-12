@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App.jsx";
@@ -399,14 +399,16 @@ describe("Call-Only experience", () => {
     await waitFor(() => expect(voice.recognitions).toHaveLength(3));
     voice.recognitions[2].onerror?.({ error: "no-speech" });
     voice.recognitions[2].onend();
-    await waitFor(() => expect(voice.recognitions).toHaveLength(3));
+    await waitFor(() => expect(voice.recognitions).toHaveLength(4));
+    voice.recognitions[3].onerror?.({ error: "no-speech" });
+    voice.recognitions[3].onend();
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "No speech was recognized. Please speak again or type your message.",
     );
-    expect(voice.recognitions).toHaveLength(3);
+    expect(voice.recognitions).toHaveLength(4);
     await userEvent.setup().click(screen.getByRole("button", { name: "Retry listening" }));
-    await waitFor(() => expect(voice.recognitions).toHaveLength(4));
+    await waitFor(() => expect(voice.recognitions).toHaveLength(5));
   });
 
   it("cleans up speech on End Call, ignores stale TTS, and starts a fresh session", async () => {
@@ -1336,7 +1338,10 @@ describe("browser text chat", () => {
     expect(screen.queryByText("Are you open Wednesday?", { selector: ".message-bubble" })).not.toBeInTheDocument();
   });
 }); describe("live call mode", () => {
-  const user = userEvent.setup();
+  let user;
+  beforeEach(() => {
+    user = userEvent.setup();
+  });
 
   it("starts live call mode recognition when selected", async () => {
     const calls = mockApi();
@@ -1541,11 +1546,17 @@ describe("browser text chat", () => {
     await waitFor(() => expect(voice.recognitions).toHaveLength(2));
     voice.recognitions[1].onerror({ error: "no-speech" });
     voice.recognitions[1].onend();
+    await waitFor(() => expect(voice.recognitions).toHaveLength(3));
+    voice.recognitions[2].onerror({ error: "no-speech" });
+    voice.recognitions[2].onend();
+    await waitFor(() => expect(voice.recognitions).toHaveLength(4));
+    voice.recognitions[3].onerror({ error: "no-speech" });
+    voice.recognitions[3].onend();
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "No speech was recognized. Please speak again",
     );
-    expect(voice.recognitions).toHaveLength(2);
+    expect(voice.recognitions).toHaveLength(4);
   });
 
   it("end call prevents recognition restart from stale callbacks", async () => {
@@ -1774,7 +1785,10 @@ describe("browser text chat", () => {
 });
 
 describe("UX06 English voice recognition reliability", () => {
-  const user = userEvent.setup();
+  let user;
+  beforeEach(() => {
+    user = userEvent.setup();
+  });
 
   it("submits isolated short word 'yes' when delivered as final result in Mic Mode", async () => {
     const calls = mockApi({ assistantText: "Your response was recorded." });
@@ -1993,6 +2007,10 @@ describe("UX06 English voice recognition reliability", () => {
     voice.recognitions[2].onerror?.({ error: "no-speech" });
     voice.recognitions[2].onend();
     await waitFor(() => expect(voice.recognitions).toHaveLength(4));
+    expect(screen.getByText("Listening", { selector: ".assistant-status" })).toBeInTheDocument();
+
+    voice.recognitions[3].onerror?.({ error: "no-speech" });
+    voice.recognitions[3].onend();
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "No speech was recognized. Please speak again or type your message.",

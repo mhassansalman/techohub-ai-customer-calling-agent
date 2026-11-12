@@ -335,17 +335,17 @@ class ConversationWorkflow:
                         outcome="clarification",
                     )
 
-            conversational = _conversational_response(request.message_text)
-            if conversational is not None:
+            if _is_short_acknowledgment(request.message_text):
                 return ConversationWorkflowResult(
-                    response_text=conversational,
+                    response_text="Thanks. What can I help you with?",
                     classification_source=ClassifierSource.RULES,
                     outcome="answered",
                 )
 
-            if _is_short_acknowledgment(request.message_text):
+            conversational = _conversational_response(request.message_text)
+            if conversational is not None:
                 return ConversationWorkflowResult(
-                    response_text="Thanks. What can I help you with?",
+                    response_text=conversational,
                     classification_source=ClassifierSource.RULES,
                     outcome="answered",
                 )
