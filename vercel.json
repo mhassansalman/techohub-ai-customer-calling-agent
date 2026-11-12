@@ -1,8 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "fastapi",
   "functions": {
     "backend/main.py": {
-      "excludeFiles": "{tests/**,frontend/**,assignment/**,docs/**,data/**,.git/**,.venv/**,**/.venv/**,**/venv/**,**/__pycache__/**,**/*.pyc,node_modules/**,.env*,**/.env*,requirements.in,requirements.lock.txt,requirements.render.txt,render.yaml,README.md,DEPLOYMENT_REPORT.md,svc_err.txt,svc_out.txt}"
+      "excludeFiles": "{{tests,frontend,assignment,docs,data}/**,README.md,.env*,**/.env*,{,**/}{.venv,venv,node_modules,.git,__pycache__}/**,**/*.pyc,requirements.{in,lock.txt,render.txt},render.yaml,*.{log,db,sqlite,sqlite3},DEPLOYMENT_REPORT.md,svc_*.txt}"
     }
   }
 }
