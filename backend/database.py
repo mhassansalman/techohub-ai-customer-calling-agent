@@ -17,7 +17,7 @@ DEFAULT_DATABASE_URL = "sqlite:///./data/techohub.db"
 
 
 class UTCDateTime(TypeDecorator[datetime]):
-    """Store UTC timestamps as canonical ISO-8601 strings in SQLite."""
+    """Store UTC timestamps as canonical ISO-8601 strings."""
 
     impl = String(32)
     cache_ok = True
@@ -46,8 +46,13 @@ class Base(DeclarativeBase):
     pass
 
 
+def is_postgresql_url(url: str) -> bool:
+    """Return True when the given database URL targets PostgreSQL."""
+    return make_url(url).get_backend_name() in {"postgresql", "postgres"}
+
+
 def create_database_engine(database_url: str | None = None) -> Engine:
-    url = database_url or os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+    url = database_url or os.getenv("DATABASE_URL") or DEFAULT_DATABASE_URL
     parsed_url = make_url(url)
     connect_args: dict[str, Any] = {}
     engine_options: dict[str, Any] = {}
@@ -57,8 +62,23 @@ def create_database_engine(database_url: str | None = None) -> Engine:
             engine_options["poolclass"] = StaticPool
         if parsed_url.database not in (None, "", ":memory:"):
             Path(parsed_url.database).parent.mkdir(parents=True, exist_ok=True)
+    elif is_postgresql_url(url):
+        parsed_url = parsed_url.set(drivername="postgresql+psycopg")
+        # Neon (and other hosted PostgreSQL providers) require TLS.  Keep the
+        # pool small so many short-lived serverless instances do not exhaust
+        # the provider's connection budget, and pre-ping connections so stale
+        # serverless connections are detected before use.
+        sslmode = parsed_url.query.get("sslmode")
+        connect_args["sslmode"] = (
+            sslmode
+            if sslmode in {"require", "verify-ca", "verify-full"}
+            else "require"
+        )
+        engine_options["pool_pre_ping"] = True
+        engine_options["pool_size"] = 1
+        engine_options["max_overflow"] = 0
 
-    engine = create_engine(url, connect_args=connect_args, **engine_options)
+    engine = create_engine(parsed_url, connect_args=connect_args, **engine_options)
 
     if parsed_url.get_backend_name() == "sqlite":
 

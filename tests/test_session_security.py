@@ -216,3 +216,32 @@ def test_health_endpoint_requires_no_session_token(tmp_path):
     app = _create_app(tmp_path)
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
+
+
+def test_cors_allows_only_configured_frontend_origin(tmp_path, monkeypatch):
+    allowed_origin = "https://techohub-ai-customer-calling-agent.vercel.app"
+    monkeypatch.setenv("TECHOHUB_CORS_ORIGINS", allowed_origin)
+    app = _create_app(tmp_path)
+
+    with TestClient(app) as client:
+        allowed = client.options(
+            "/api/sessions",
+            headers={
+                "Origin": allowed_origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-session-token",
+            },
+        )
+        denied = client.options(
+            "/api/sessions",
+            headers={
+                "Origin": "https://untrusted.example",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-session-token",
+            },
+        )
+
+    assert allowed.status_code == 200
+    assert allowed.headers["access-control-allow-origin"] == allowed_origin
+    assert denied.status_code == 400
+    assert "access-control-allow-origin" not in denied.headers

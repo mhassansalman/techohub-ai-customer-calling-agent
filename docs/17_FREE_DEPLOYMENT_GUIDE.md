@@ -1,158 +1,202 @@
-# 17 — Free Deployment Guide (Render + Vercel)
+# 17 — Free Deployment Guide (Vercel + Neon)
 
-> Academic demonstration deployment. Budget: $0. No paid services, domains, or
-> infrastructure. This guide prepares the repository for public access; it does
-> not perform the public deployment itself.
+> This guide configures a separate Vercel Hobby FastAPI backend and Vercel
+> Hobby frontend, backed by Neon PostgreSQL Free. It documents deployment steps;
+> it does not claim that a public backend or a live Neon connection has been
+> deployed or tested. Review each provider's current quotas and plan terms before
+> deploying; do not enable paid services or billing.
 
 ## Target architecture
 
-| Tier | Provider | Plan | Cost | Purpose |
-|------|----------|------|------|---------|
-| Source | GitHub | Free | $0 | Git repository (`main`) |
-| Backend | Render | Free ($0/mo) | $0 | FastAPI app, HTTPS by Render |
-| Frontend | Vercel | Hobby | $0 | React/Vite build, HTTPS by Vercel |
+| Component | Provider | Project configuration | Data |
+|---|---|---|---|
+| Source | GitHub | `mhassansalman/techohub-ai-customer-calling-agent`, `main` | Application source |
+| Frontend | Vercel Hobby | Existing project; root directory `frontend` | Static React/Vite bundle |
+| Backend | Vercel Hobby | Separate project; repository root | FastAPI Vercel Function |
+| Database | Neon Free | PostgreSQL pooled connection | Sessions, messages, tickets, audit events |
 
-Data flow: browser (Vercel HTTPS) → `VITE_API_BASE_URL` → Render backend HTTPS → SQLite (ephemeral) / Groq (optional, key never reaches browser).
+Browser requests go to the backend's `/api` routes. SQLite remains the local
+development default. The backend requires a PostgreSQL `DATABASE_URL` when it
+runs on Vercel and never copies local SQLite data to Neon.
 
-## Prerequisites
+## Runtime configuration
 
-- GitHub repository: `mhassansalman/techohub-ai-customer-calling-agent`, branch `main`.
-- Render account connected to the GitHub repo.
-- Vercel account connected to the same GitHub repo.
-- Backend secret `GROQ_API_KEY` and `STAFF_API_KEY` available (Render secret UI).
-- No billing/credit card on either platform (free tiers only).
+- Vercel's Python runtime discovers FastAPI applications and supports a custom
+  `module:app` entrypoint through `tool.vercel.entrypoint` in `pyproject.toml`.
+  This repository configures `backend.main:app`.
+- Root `requirements.txt` contains the production runtime dependencies,
+  including `psycopg[binary]`; it excludes tests and the local semantic-ML stack.
+  `requirements.lock.txt` remains the fuller local development/test environment.
+- Vercel's Python bundle configuration excludes development environments,
+  bytecode, local environment files, tests, and frontend sources. The inspected
+  backend/fixture/knowledge source payload is 267,662 bytes; the actual Vercel
+  dependency bundle has not been built or measured.
+- Vercel routes requests to the FastAPI ASGI app. No rewrite is needed for
+  `/health`, `/api/services`, or `/api/sessions/*`.
+- Lifespan startup creates tables from the SQLAlchemy models. This is not a
+  schema migration system; use a new/empty Neon database for this integration.
+- Database connection URLs using `postgresql://` or `postgres://` are normalized
+  to the installed psycopg 3 driver. TLS is required and the SQLAlchemy pool is
+  capped at one connection with no overflow and connection pre-ping.
+- Semantic RAG and MCP are forced off on Vercel. Deterministic service/OKF
+  behavior remains available; lexical RAG is available only if explicitly
+  enabled. Groq classification is optional, uses rules-first fallback, and is
+  not required for startup.
 
-## Files added/changed for deployment
+Vercel runtime references:
+[Python Runtime](https://vercel.com/docs/functions/runtimes/python) and
+[FastAPI](https://vercel.com/docs/frameworks/backend/fastapi).
 
-- `render.yaml` — reproducible Render service definition (build/start commands, env vars, health check).
-- `requirements.render.txt` — lighter Render dependency set (excludes torch/sentence-transformers/transformers; semantic RAG disabled on Render Free).
-- `frontend/vercel.json` — declares Vite framework, build command, output directory.
-- `.env.example` — environment variable names only, no real secrets.
-- `docs/17_FREE_DEPLOYMENT_GUIDE.md` — this guide.
-- `tests/test_session_security.py` — per-session access token regression tests.
-- `frontend/src/api.test.js` — `VITE_API_BASE_URL` configuration tests.
-- `backend/main.py`, `backend/models.py`, `backend/schemas.py`, `frontend/src/App.jsx`, `frontend/src/api.js` — session authorization + API base URL.
+## 1. Create the separate Vercel backend project
 
-## Render backend settings
+1. In Vercel, choose **Add New → Project** and import
+   `mhassansalman/techohub-ai-customer-calling-agent`.
+2. Select the `main` production branch.
+3. Keep the **Root Directory** at the repository root (`.` / blank), not
+   `frontend`. This backend must be a separate project from the existing
+   frontend project.
+4. Let Vercel detect the Python/FastAPI runtime. Do not set a frontend
+   framework, static output directory, or frontend build command.
+5. Keep the default Python install/build behavior. Vercel installs from the
+   root `requirements.txt`; `pyproject.toml` identifies `backend.main:app`.
+   Do not add a custom Uvicorn start command.
+6. Configure the environment variables below before the first production
+   deployment. Do not copy the existing frontend project's `vercel.json` into
+   this backend project.
 
-Create a **New Web Service** → "Build and deploy from a Git repository".
+The backend base URL will be similar to
+`https://<backend-project>.vercel.app`. The frontend API base URL includes the
+`/api` path suffix.
 
-| Setting | Value |
-|---------|-------|
-| Repository | `mhassansalman/techohub-ai-customer-calling-agent` |
-| Branch | `main` |
-| Region | Ohio (US East) |
-| Compute | Free ($0/month) |
-| Root Directory | blank (repository root) |
-| Build Command | `pip install -r requirements.render.txt` |
-| Start Command | `python -m uvicorn backend.main:create_app --factory --host 0.0.0.0 --port $PORT` |
-| Health Check Path | `/health` |
-| Auto Deploy | On (after manual verification) |
+## 2. Configure Neon PostgreSQL
 
-### Render environment variables
+1. In Neon, open the existing project and select its **pooled** connection
+   string for the production database. The hostname should identify the Neon
+   pooler (commonly `-pooler` in the host); pooled connections are recommended
+   for serverless functions.
+2. Use the SSL-enabled connection string. Do not put its value in source,
+   documentation, a command line, or a `VITE_*` variable.
+3. In the Vercel backend project's **Settings → Environment Variables**, add
+   `DATABASE_URL` for **Production** as a sensitive value. Set its value to the
+   Neon pooled connection string. The application requires PostgreSQL on
+   Vercel and fails startup if this variable is missing or points to SQLite.
+4. Do not set a Neon credential in local development unless intentionally
+   testing against Neon. Locally, an absent `DATABASE_URL` uses
+   `./data/techohub.db`.
 
-| Variable | Value | Secret? |
-|----------|-------|---------|
-| `GROQ_API_KEY` | your Groq key | Yes (Render secret UI, `sync: false`) |
-| `STAFF_API_KEY` | your staff key | Yes (Render secret UI) |
-| `TECHOHUB_RAG_ENABLED` | `false` | No |
-| `TECHOHUB_RAG_PROVIDER` | `lexical` | No |
-| `TECHOHUB_MCP_ENABLED` | `false` | No |
-| `TECHOHUB_CORS_ORIGINS` | `<Vercel HTTPS URL>` after frontend deploy | No |
-| `DATABASE_URL` | (omit → ephemeral `./data/techohub.db`) | No |
+No local SQLite rows are migrated. Existing Neon tables are not altered by
+`create_all`; use a new database for the initial deployment.
 
-Render Free constraints honored: ephemeral filesystem (SQLite lost on redeploy/restart), no large model downloads at startup (RAG disabled, sentence-transformers import is lazy), no paid inference at startup, bounded Groq retries with rules-first fallback.
+## 3. Set backend environment variables
 
-### Health check
+Set these in the **backend Vercel project**, for the Production environment:
 
-`GET /health` → `{"status": "ok"}` (HTTP 200). No session token required.
+| Variable | Value | Handling |
+|---|---|---|
+| `DATABASE_URL` | Neon pooled PostgreSQL connection string | Secret |
+| `GROQ_API_KEY` | Groq key, if enabling model-assisted classification | Secret; optional |
+| `STAFF_API_KEY` | Independently generated high-entropy staff key | Secret |
+| `TECHOHUB_RAG_ENABLED` | `false` | Non-secret |
+| `TECHOHUB_RAG_PROVIDER` | `lexical` | Non-secret |
+| `TECHOHUB_MCP_ENABLED` | `false` | Non-secret |
+| `TECHOHUB_CORS_ORIGINS` | `https://techohub-ai-customer-calling-agent.vercel.app` | Non-secret |
 
-## Vercel frontend settings
+Set `STAFF_API_KEY` even if no staff UI is deployed; staff endpoints fail closed
+without it. The optional Groq key is used only for intent classification;
+deterministic rules remain available when it is absent or the provider fails.
+Do not set `GROQ_API_KEY`, `STAFF_API_KEY`, or `DATABASE_URL` as a `VITE_*`
+variable, and do not manually define Vercel's `VERCEL` system variable.
 
-Create a **New Project** → import the same GitHub repo.
+The code also prevents wildcard CORS and disables MCP and semantic retrieval
+when running on Vercel, even if a feature flag is accidentally changed.
 
-| Setting | Value |
-|---------|-------|
-| Framework Preset | Vite |
-| Root Directory | `frontend` |
-| Production Branch | `main` |
-| Build Command | `npm run build` |
-| Output Directory | `dist` |
-| Install Command | `npm install` (or `npm ci`) |
+## 4. Deploy and test the backend
 
-### Vercel environment variable
+1. Save the backend environment variables and deploy the `main` branch.
+2. Check `GET https://<backend-project>.vercel.app/health`; expect HTTP 200 and
+   `{"status":"ok"}`.
+3. Check `GET https://<backend-project>.vercel.app/api/services`; expect the
+   approved service catalog.
+4. Confirm a missing/invalid `DATABASE_URL` prevents Vercel startup rather than
+   falling back to an ephemeral SQLite file.
+5. Confirm an unconfigured/wrong staff key cannot access `/api/staff/tickets`.
 
-| Variable | Value | Secret? |
-|----------|-------|---------|
-| `VITE_API_BASE_URL` | Render backend public HTTPS URL | No (public browser config) |
+Do not use real customer data for a public academic demonstration. Vercel
+serverless invocations can start separate processes; Neon is the shared source
+of application state. No live database connectivity, persistence-across-cold-
+starts, or public deployment has been verified as part of this repository task.
 
-No `GROQ_API_KEY` or `STAFF_API_KEY` in Vercel. `VITE_*` variables are public browser configuration.
+## 5. Update the existing frontend project
 
-## Critical post-deployment step
+Leave the existing Vercel frontend project separate and unchanged except for
+its environment value:
 
-Render's CORS allow-list defaults to empty (no cross-origin traffic). After the Vercel frontend has a public HTTPS URL:
+1. Open the existing frontend project's **Settings → Environment Variables**.
+2. Set `VITE_API_BASE_URL` for **Production** to
+   `https://<backend-project>.vercel.app/api` (replace the hostname with the
+   deployed backend URL; include `/api`).
+3. Do not put any backend secret in a `VITE_*` value. Vite variables are public
+   browser configuration.
+4. Redeploy the existing frontend so the new API URL is included in its build.
 
-1. Open the Render service → Environment Variables.
-2. Set `TECHOHUB_CORS_ORIGINS` to the Vercel frontend HTTPS URL (e.g. `https://techohub.vercel.app`).
-3. Save and redeploy the Render backend.
+The React client already reads `VITE_API_BASE_URL`, forwards
+`X-Session-Token` for session operations, and displays a safe error message
+when API requests fail. The deployment does not require frontend source or
+project-root changes.
 
-Without this, the browser cannot call the Render API from the Vercel origin.
+## 6. Verify public chat/session continuity
 
-## Session security (public-demo authorization)
+From the deployed frontend:
 
-- A per-session access token (`token_urlsafe(32)`) is issued at session start and returned in the `POST /api/sessions` response (`access_token`).
-- The public session UUID alone does NOT authorize reads/writes/termination.
-- `X-Session-Token` header is required on `GET /api/sessions/{id}`, `POST /api/sessions/{id}/messages`, and `POST /api/sessions/{id}/end`.
-- Tokens are compared with `secrets.compare_digest`, never placed in URLs, never logged, not persisted to browser storage (kept in a React ref).
-- Cross-session access with another session's token returns HTTP 401.
-- Staff ticket endpoints are protected by `STAFF_API_KEY` (HTTP 503 if unconfigured, 401 if wrong).
-- Groq credentials and staff secrets are never exposed to the frontend.
-- CORS is restrictive by default (no origins unless `TECHOHUB_CORS_ORIGINS` is set).
+1. Load the app and browse services.
+2. Start a text conversation; the backend creates the session and returns a
+   random per-session access token.
+3. Send multiple messages, refresh or revisit the app only if the UI preserves
+   the active session, and confirm the same backend session continues.
+4. Verify session status, message submission, and ending require the matching
+   `X-Session-Token`. A token from another session must receive HTTP 401.
+5. Confirm support ticket creation remains idempotent for a customer message
+   and staff list/detail endpoints require `X-Staff-API-Key`.
+6. Check browser developer tools to ensure no credentials or session tokens
+   appear in URLs or browser logs.
 
-Regression tests: `tests/test_session_security.py` (7 tests, live FastAPI TestClient request paths) plus token forwarding across `tests/test_api_sessions.py` and `tests/test_workflow.py`.
+The session token is held in the existing React component's memory, not in a
+URL or persistent browser storage. A full browser/API/Neon acceptance test must
+be performed after deployment; automated local tests are not evidence of a
+live deployment.
 
-## Persistence (SQLite, ephemeral on Render Free)
+## Security and persistence notes
 
-- Default database: `./data/techohub.db`, created automatically at startup (`Base.metadata.create_all`).
-- Render Free filesystem is ephemeral: conversation history, tickets, and session state may disappear on redeploy, restart, or instance sleep.
-- This is an academic demo; no production durability is claimed. No real customer information should be used.
-- No migrations introduced; schema derives from SQLAlchemy models.
+- `X-Session-Token` is required for session reads, message submission, and
+  session termination. Possession of a session UUID alone is insufficient.
+- Staff endpoints require `STAFF_API_KEY`; missing configuration returns 503
+  and invalid credentials return 401.
+- Production CORS must use the exact frontend origin above, without a wildcard.
+- Secrets are server-side environment variables and are not exposed in the
+  frontend bundle or logged by the application.
+- PostgreSQL persists session records, messages, availability context, tickets,
+  and audit events in shared Neon storage. The integration does not migrate
+  local data, and no Neon persistence test has been performed yet.
+- Database tables are created by SQLAlchemy `create_all` on application
+  startup. There is no migration tool configured for this deployment.
+- Semantic embeddings/model packages are omitted from the Vercel runtime
+  requirements. No model is downloaded at startup; MCP remains disabled.
+- Free-tier availability, quotas, and limits may change. Stay within the
+  selected free plans and do not enable paid compute or services.
 
-## Verification (local, pre-deployment)
+## Verification performed locally
 
 | Check | Result |
-|-------|--------|
-| Backend pytest (full suite) | 400 passed |
-| Security tests (`test_session_security.py`) | 7 passed |
-| Frontend Vitest | 93 passed |
-| Frontend production build | passed |
-| Python compileall | passed |
-| `git diff --check` | clean |
-| Render start command smoke test (`/health`) | HTTP 200 `{"status":"ok"}` |
-| Committed secrets | none |
+|---|---|
+| Full backend pytest suite | 420 passed |
+| Focused database-engine and session-security regressions | 27 passed |
+| PostgreSQL dialect model DDL compilation | Passed; no real PostgreSQL connection |
+| Frontend Vitest | 97 passed |
+| Frontend production build | Passed; JavaScript bundle 262.07 kB (79.61 kB gzip) |
+| Backend source/data payload | 267,662 bytes excluding local environments and bytecode; dependency bundle not built |
+| Python compilation | Passed |
+| `vercel.json` and `pyproject.toml` parsing | Passed |
+| `git diff --check` | Passed |
 
-## Known limitations
-
-- Render Free cold starts after inactivity (first request may be slow).
-- SQLite data is not durable across Render redeploys/restarts.
-- Semantic RAG and MCP are disabled on Render Free (CPU/RAM); preserved locally.
-- No custom domain; HTTPS provided by Render/Vercel subdomains.
-- Dependent on public-demo session-token authorization, not a full user-account system.
-
-## Deployment order
-
-1. Push and merge deployment changes to `main`.
-2. Deploy Render backend; verify `GET /health`.
-3. Deploy Vercel frontend using Render's public HTTPS URL as `VITE_API_BASE_URL`.
-4. Set Render `TECHOHUB_CORS_ORIGINS` to the Vercel URL; redeploy backend.
-5. Verify public end-to-end: create session, send message, end session (each with the session token).
-
-## Manual steps by platform
-
-**GitHub:** push `feature/free-deployment` to origin and open a merge/pull request into `main` (requires permission; not done in this session).
-
-**Render:** create web service with the settings above; add secret env vars; verify `/health`; after Vercel deploy, set `TECHOHUB_CORS_ORIGINS`.
-
-**Vercel:** import repo, root directory `frontend`, set `VITE_API_BASE_URL` to Render URL, deploy.
-
-**End-to-end test:** open the Vercel URL, start a conversation (Message/Mic/Live Call/Call-Only), confirm the backend is reachable, and end the session.
+These local checks do not prove a live Neon connection, a public backend
+deployment, Vercel production behavior, or a public end-to-end session.

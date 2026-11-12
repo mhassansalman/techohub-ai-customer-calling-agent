@@ -910,7 +910,7 @@
       "v2_priority": "P2-S",
       "status": "Pending",
       "done": "Pending",
-      "evidence": "Free-tier/provider, topology, HTTPS and persistence evidence not collected.",
+      "evidence": "Locally verified the selected topology and persistence design: separate Vercel frontend/backend projects, PostgreSQL DATABASE_URL on Vercel, local SQLite default, and SQLAlchemy persistence for sessions/messages/tickets/audit events. Provider account quotas, billing status, public HTTPS, and live Neon persistence have not been independently verified; DEP00 remains pending.",
       "tests": "T-DEP-01, T-DEP-02",
       "depends_on": "A19"
     },
@@ -921,7 +921,7 @@
       "v2_priority": "P2-S",
       "status": "Pending",
       "done": "Pending",
-      "evidence": "No Docker build/run evidence established; keep secrets out of images.",
+      "evidence": "Vercel-native FastAPI entrypoint, production requirements, routing configuration, and health/deployment instructions are present and locally parseable. Docker artifacts/build are not part of the selected Vercel runtime; no Vercel build or deployed health probe has been run, so DEP01 remains pending.",
       "tests": "T-DEP-01",
       "depends_on": "DEP00"
     },
@@ -932,7 +932,7 @@
       "v2_priority": "P2-S",
       "status": "Pending",
       "done": "Pending",
-      "evidence": "No provider or public deployment selected or verified; no free-tier claim established.",
+      "evidence": "Vercel Hobby and Neon Free are the requested deployment targets and local project configuration is prepared. No Vercel/Neon production deployment, public HTTPS check, or zero-billed account verification has been performed; DEP02 remains pending.",
       "tests": "T-DEP-02",
       "depends_on": "DEP01, A19"
     },
@@ -943,7 +943,7 @@
       "v2_priority": "P2-S",
       "status": "Pending",
       "done": "Pending",
-      "evidence": "Durable-vs-disposable deployment storage policy not tested.",
+      "evidence": "Local SQLite remains the default; PostgreSQL engine configuration and PostgreSQL-dialect model DDL are covered without live credentials. No Neon connection, restart/cold-start persistence, or deployed storage behavior has been tested; DEP03 remains pending.",
       "tests": "T-DEP-02",
       "depends_on": "DEP00, DEP02"
     },
@@ -954,7 +954,7 @@
       "v2_priority": "P2-S",
       "status": "Pending",
       "done": "Pending",
-      "evidence": "Depends on deployment, storage decision, UX regression, selected RAG/agent/MCP integrations, and approved mitigation for anonymous session APIs; no public exposure before that gate.",
+      "evidence": "Updated docs/17_FREE_DEPLOYMENT_GUIDE.md with the separate Vercel backend, Neon, frontend API URL, security, and manual end-to-end steps. No public backend deployment or browser-to-Neon session continuity test has occurred; DEP04 remains pending.",
       "tests": "T-DEP-02",
       "depends_on": "UX07, A18, A19, DEP02, DEP03"
     },
