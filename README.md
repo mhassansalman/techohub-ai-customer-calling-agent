@@ -189,6 +189,17 @@ was audible. Chrome speech recognition may use an online browser service; do
 not use personal or customer data. The page does not save recordings/results
 and does not call this application’s backend.
 
+## Free deployment (Render + Vercel)
+
+The app is prepared for a $0 public academic demo on Render Free (FastAPI backend)
+and Vercel Hobby (React/Vite frontend), with HTTPS provided by the platforms.
+See [docs/17_FREE_DEPLOYMENT_GUIDE.md](docs/17_FREE_DEPLOYMENT_GUIDE.md) for the
+exact Render/Vercel settings, environment variables, session-authorization design,
+persistence limitations, and manual deployment steps.
+
+No public deployment has been performed yet; deployment changes are staged locally
+on branch `feature/free-deployment` and have not been pushed or merged.
+
 ## Documentation
 
 - [Documentation index](docs/00_MASTER_INDEX.md)

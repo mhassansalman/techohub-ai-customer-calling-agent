@@ -77,6 +77,7 @@ export default function App() {
   const voiceAttemptRef = useRef(0);
   const voiceSubmissionRef = useRef(false);
   const sessionRef = useRef(null);
+  const sessionAccessTokenRef = useRef(null);
   const observedSessionIdRef = useRef(null);
   const observedSessionStatusRef = useRef(null);
   const mountedRef = useRef(true);
@@ -164,6 +165,7 @@ export default function App() {
     voiceSubmissionRef.current = false;
     liveCallRestartNeededRef.current = false;
     liveCallNoSpeechRecoveryCountRef.current = 0;
+    sessionAccessTokenRef.current = null;
     setListening(false);
     setSpeaking(false);
     setVoiceFeedback("");
@@ -181,6 +183,7 @@ export default function App() {
       );
       const openedSession = result.session;
       sessionRef.current = openedSession;
+      sessionAccessTokenRef.current = result.accessToken;
       setSession(openedSession);
       setMessages([
         {
@@ -192,7 +195,10 @@ export default function App() {
       ]);
 
       try {
-        const status = await getSessionStatus(openedSession.session_id);
+        const status = await getSessionStatus(
+          openedSession.session_id,
+          sessionAccessTokenRef.current
+        );
         sessionRef.current = status;
         setSession(status);
         if (status.status !== "active") {
@@ -334,6 +340,7 @@ export default function App() {
         modality,
         language,
         asrConfidence,
+        accessToken: sessionAccessTokenRef.current,
       });
       if (
         !mountedRef.current ||
@@ -351,7 +358,10 @@ export default function App() {
       setDraft("");
 
       try {
-        const status = await getSessionStatus(targetSessionId);
+        const status = await getSessionStatus(
+          targetSessionId,
+          sessionAccessTokenRef.current
+        );
         if (
           !mountedRef.current ||
           sessionRef.current?.session_id !== targetSessionId
@@ -847,7 +857,10 @@ export default function App() {
     setError("");
     setNotice("");
     try {
-      const closedSession = await endSession(session.session_id);
+      const closedSession = await endSession(
+        session.session_id,
+        sessionAccessTokenRef.current
+      );
       sessionRef.current = closedSession;
       setSession(closedSession);
       setNotice("Conversation ended. Your messages were saved.");

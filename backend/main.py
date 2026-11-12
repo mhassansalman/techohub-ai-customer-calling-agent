@@ -10,6 +10,7 @@ from typing import AsyncIterator
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -68,6 +69,41 @@ WORKFLOW_FAILURE_RESPONSE = (
     "I couldn't safely complete that request right now. Your message was "
     "recorded; please try again later."
 )
+
+SESSION_TOKEN_HEADER = "X-Session-Token"
+
+
+def _cors_allow_origins() -> list[str]:
+    """Parse comma-separated allowed origins from configuration.
+
+    Defaults to allowing no cross-origin browser traffic. Render operators set
+    TECHOHUB_CORS_ORIGINS to the public frontend origin(s) (e.g. the Vercel
+    Hobby URL). Never allow ``*`` for session-scoped endpoints in production.
+    """
+    raw = os.getenv("TECHOHUB_CORS_ORIGINS", "").strip()
+    if not raw:
+        return []
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def require_session_access_token(
+    conversation: ConversationSession,
+    x_session_token: str | None = Header(default=None, alias=SESSION_TOKEN_HEADER),
+) -> None:
+    """Reject session-scoped requests that lack a valid per-session access token.
+
+    The session UUID alone must not authorize reads, writes, or termination: a
+    bearer token issued at session start is required on every session-specific
+    operation so that knowing (or guessing) a UUID is insufficient to touch
+    another customer's conversation.
+    """
+    provided = (x_session_token or "").encode("utf-8")
+    expected = (conversation.access_token or "").encode("utf-8")
+    if not provided or not secrets.compare_digest(provided, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session access token is required or invalid.",
+        )
 
 
 def require_staff_api_key(
@@ -190,6 +226,16 @@ def create_app(
         mcp_enabled=McpConfig.from_environment().enabled,
     )
 
+    allowed_origins = _cors_allow_origins()
+    if allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allowed_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["Content-Type", "Accept", SESSION_TOKEN_HEADER],
+        )
+
     def get_db() -> Generator[Session, None, None]:
         yield from database_session_dependency(app.state.session_factory)
 
@@ -243,6 +289,7 @@ def create_app(
         return SessionStartResponse(
             session=_session_status_response(db, conversation),
             assistant_disclosure=ASSISTANT_DISCLOSURE,
+            access_token=conversation.access_token,
         )
 
     @app.get(
@@ -251,6 +298,7 @@ def create_app(
     )
     def read_session_status(
         session_id: UUID = Path(),
+        x_session_token: str | None = Header(default=None, alias=SESSION_TOKEN_HEADER),
         db: Session = Depends(get_db),
     ) -> SessionStatusResponse:
         try:
@@ -260,6 +308,7 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Session not found.",
             ) from error
+        require_session_access_token(conversation, x_session_token)
         return _session_status_response(db, conversation)
 
     @app.post(
@@ -269,6 +318,7 @@ def create_app(
     def create_message(
         payload: CustomerRequest,
         session_id: UUID = Path(),
+        x_session_token: str | None = Header(default=None, alias=SESSION_TOKEN_HEADER),
         db: Session = Depends(get_db),
     ) -> SessionMessageResponse:
         if payload.session_id != session_id:
@@ -276,6 +326,14 @@ def create_app(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Request session_id must match the URL session_id.",
             )
+        try:
+            conversation = get_session(db, session_id)
+        except SessionNotFoundError as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found.",
+            ) from error
+        require_session_access_token(conversation, x_session_token)
         try:
             customer_message = persist_customer_message(
                 db,
@@ -348,8 +406,17 @@ def create_app(
     def end_session(
         payload: SessionEndRequest,
         session_id: UUID = Path(),
+        x_session_token: str | None = Header(default=None, alias=SESSION_TOKEN_HEADER),
         db: Session = Depends(get_db),
     ) -> SessionStatusResponse:
+        try:
+            conversation = get_session(db, session_id)
+        except SessionNotFoundError as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found.",
+            ) from error
+        require_session_access_token(conversation, x_session_token)
         try:
             conversation = close_session(
                 db,

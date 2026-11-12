@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import StrEnum
+from secrets import token_urlsafe
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -61,6 +62,11 @@ class ConversationSession(Base):
     )
     auth_state: Mapped[str] = mapped_column(
         String(16), nullable=False, default="anonymous"
+    )
+    access_token: Mapped[str] = mapped_column(
+        String(96),
+        nullable=False,
+        default=lambda: token_urlsafe(32),
     )
     outcome: Mapped[str | None] = mapped_column(String(24), nullable=True)
     start_trace_id: Mapped[str] = mapped_column(String(36), nullable=False)

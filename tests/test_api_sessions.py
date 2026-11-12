@@ -29,6 +29,25 @@ def _message_payload(session_id: str) -> dict[str, object]:
         "message_text": "TEST ONLY: What are your hours?",
     }
 
+# Per-session access tokens issued at session start. Session-scoped endpoints
+# now require the X-Session-Token header, so tests capture the token returned
+# by session creation and forward it on every subsequent request.
+_session_tokens: dict[str, str] = {}
+
+
+def _start_session(client: TestClient) -> str:
+    started = client.post("/api/sessions", json={"channel_type": "text_web"})
+    assert started.status_code == 201
+    body = started.json()
+    session_id = body["session"]["session_id"]
+    _session_tokens[session_id] = body["access_token"]
+    return session_id
+
+
+def _token_headers(session_id: str) -> dict[str, str]:
+    token = _session_tokens.get(session_id)
+    return {"X-Session-Token": token} if token else {}
+
 
 def _seed_tickets(app, count: int) -> list[tuple[str, datetime]]:
     with app.state.session_factory() as db:
@@ -73,6 +92,7 @@ def test_api_start_message_status_and_end_lifecycle(tmp_path: Path) -> None:
         assert started.status_code == 201
         start_payload = started.json()
         session_id = start_payload["session"]["session_id"]
+        _session_tokens[session_id] = start_payload["access_token"]
 
         assert start_payload["session"]["status"] == "active"
         assert start_payload["session"]["message_count"] == 1
@@ -80,6 +100,7 @@ def test_api_start_message_status_and_end_lifecycle(tmp_path: Path) -> None:
 
         sent = client.post(
             f"/api/sessions/{session_id}/messages",
+            headers=_token_headers(session_id),
             json=_message_payload(session_id),
         )
         assert sent.status_code == 200
@@ -90,7 +111,9 @@ def test_api_start_message_status_and_end_lifecycle(tmp_path: Path) -> None:
         assert "Monday" in message_payload["assistant_message"]["text"]
         assert "Etc/UTC" in message_payload["assistant_message"]["text"]
 
-        status_response = client.get(f"/api/sessions/{session_id}")
+        status_response = client.get(
+            f"/api/sessions/{session_id}", headers=_token_headers(session_id)
+        )
         assert status_response.status_code == 200
         assert status_response.json()["message_count"] == 3
         assert status_response.json()["audit_event_count"] == 3
@@ -98,6 +121,7 @@ def test_api_start_message_status_and_end_lifecycle(tmp_path: Path) -> None:
 
         ended = client.post(
             f"/api/sessions/{session_id}/end",
+            headers=_token_headers(session_id),
             json={"outcome": "unresolved"},
         )
         assert ended.status_code == 200
@@ -200,16 +224,18 @@ def test_service_card_inquiry_uses_existing_message_flow_without_ticket_mutation
 ) -> None:
     app = create_app(f"sqlite:///{(tmp_path / 'service_inquiry.sqlite3').as_posix()}")
     with TestClient(app) as client:
-        started = client.post("/api/sessions", json={"channel_type": "text_web"})
-        session_id = started.json()["session"]["session_id"]
+        session_id = _start_session(client)
         payload = _message_payload(session_id)
         payload["message_text"] = "What is the price and duration of Haircut?"
 
         response = client.post(
             f"/api/sessions/{session_id}/messages",
+            headers=_token_headers(session_id),
             json=payload,
         )
-        status_response = client.get(f"/api/sessions/{session_id}")
+        status_response = client.get(
+            f"/api/sessions/{session_id}", headers=_token_headers(session_id)
+        )
         with app.state.session_factory() as db:
             tickets = list(db.scalars(select(HandoffTicket)))
 
@@ -235,6 +261,7 @@ def test_api_persists_browser_voice_transcript_channel_and_cancelled_outcome(
         assert started.status_code == 201
         start_payload = started.json()
         session_id = start_payload["session"]["session_id"]
+        _session_tokens[session_id] = start_payload["access_token"]
         assert start_payload["session"]["channel_type"] == "browser_voice"
         assert "recognized speech transcripts are stored" in start_payload[
             "assistant_disclosure"
@@ -252,6 +279,7 @@ def test_api_persists_browser_voice_transcript_channel_and_cancelled_outcome(
         )
         sent = client.post(
             f"/api/sessions/{session_id}/messages",
+            headers=_token_headers(session_id),
             json=payload,
         )
         assert sent.status_code == 200
@@ -263,6 +291,7 @@ def test_api_persists_browser_voice_transcript_channel_and_cancelled_outcome(
 
         ended = client.post(
             f"/api/sessions/{session_id}/end",
+            headers=_token_headers(session_id),
             json={"outcome": "cancelled"},
         )
         assert ended.status_code == 200
@@ -315,7 +344,9 @@ def test_mock_call_api_lifecycle_persists_transcript_and_cancelled_outcome(
             json={"channel_type": "mock_call"},
         )
         assert started.status_code == 201
-        session_id = started.json()["session"]["session_id"]
+        start_payload = started.json()
+        session_id = start_payload["session"]["session_id"]
+        _session_tokens[session_id] = start_payload["access_token"]
 
         payload = _message_payload(session_id)
         payload.update(
@@ -326,6 +357,7 @@ def test_mock_call_api_lifecycle_persists_transcript_and_cancelled_outcome(
         )
         sent = client.post(
             f"/api/sessions/{session_id}/messages",
+            headers=_token_headers(session_id),
             json=payload,
         )
         assert sent.status_code == 200
@@ -334,6 +366,7 @@ def test_mock_call_api_lifecycle_persists_transcript_and_cancelled_outcome(
 
         ended = client.post(
             f"/api/sessions/{session_id}/end",
+            headers=_token_headers(session_id),
             json={"outcome": "cancelled"},
         )
         assert ended.status_code == 200
@@ -393,6 +426,7 @@ def test_api_creates_confirmed_ticket_and_returns_persisted_id_once(
             json={"channel_type": channel_type},
         )
         session_id = started.json()["session"]["session_id"]
+        _session_tokens[session_id] = started.json()["access_token"]
 
         request_payload = _message_payload(session_id)
         request_payload.update(
@@ -404,6 +438,7 @@ def test_api_creates_confirmed_ticket_and_returns_persisted_id_once(
         )
         handoff_request = client.post(
             f"/api/sessions/{session_id}/messages",
+            headers=_token_headers(session_id),
             json=request_payload,
         )
         assert handoff_request.status_code == 200
@@ -421,6 +456,7 @@ def test_api_creates_confirmed_ticket_and_returns_persisted_id_once(
         )
         ambiguous = client.post(
             f"/api/sessions/{session_id}/messages",
+            headers=_token_headers(session_id),
             json=ambiguous_payload,
         )
         assert "yes or no" in ambiguous.json()["assistant_message"]["text"]
@@ -437,6 +473,7 @@ def test_api_creates_confirmed_ticket_and_returns_persisted_id_once(
         )
         confirmed = client.post(
             f"/api/sessions/{session_id}/messages",
+            headers=_token_headers(session_id),
             json=confirmation_payload,
         )
         assert confirmed.status_code == 200
@@ -449,6 +486,7 @@ def test_api_creates_confirmed_ticket_and_returns_persisted_id_once(
 
         repeated_confirmation = client.post(
             f"/api/sessions/{session_id}/messages",
+            headers=_token_headers(session_id),
             json=confirmation_payload,
         )
         assert repeated_confirmation.status_code == 200
@@ -491,10 +529,12 @@ def test_api_ticket_persistence_failure_never_claims_success(
         with TestClient(app) as client:
             started = client.post("/api/sessions", json={"channel_type": "text_web"})
             session_id = started.json()["session"]["session_id"]
+            _session_tokens[session_id] = started.json()["access_token"]
             request_payload = _message_payload(session_id)
             request_payload["message_text"] = "I want to speak to someone."
             client.post(
                 f"/api/sessions/{session_id}/messages",
+                headers=_token_headers(session_id),
                 json=request_payload,
             )
 
@@ -502,6 +542,7 @@ def test_api_ticket_persistence_failure_never_claims_success(
             confirmation_payload["message_text"] = "Yes"
             failed = client.post(
                 f"/api/sessions/{session_id}/messages",
+                headers=_token_headers(session_id),
                 json=confirmation_payload,
             )
             response_text = failed.json()["assistant_message"]["text"]
@@ -532,11 +573,13 @@ def test_confirmed_ticket_is_retrievable_through_staff_api(
         started = client.post("/api/sessions", json={"channel_type": "text_web"})
         assert started.status_code == 201
         session_id = started.json()["session"]["session_id"]
+        _session_tokens[session_id] = started.json()["access_token"]
 
         request_payload = _message_payload(session_id)
         request_payload["message_text"] = "I want to speak to someone."
         handoff_request = client.post(
             f"/api/sessions/{session_id}/messages",
+            headers=_token_headers(session_id),
             json=request_payload,
         )
         assert handoff_request.status_code == 200
@@ -548,6 +591,7 @@ def test_confirmed_ticket_is_retrievable_through_staff_api(
         confirmation_payload["message_text"] = "Yes, please."
         confirmed = client.post(
             f"/api/sessions/{session_id}/messages",
+            headers=_token_headers(session_id),
             json=confirmation_payload,
         )
         assert confirmed.status_code == 200
@@ -718,8 +762,10 @@ def test_staff_ticket_detail_requires_auth_and_returns_safe_record(
         )
         assert public_session.status_code == 201
         public_session_id = public_session.json()["session"]["session_id"]
+        _session_tokens[public_session_id] = public_session.json()["access_token"]
         public_message = client.post(
             f"/api/sessions/{public_session_id}/messages",
+            headers=_token_headers(public_session_id),
             json=_message_payload(public_session_id),
         )
 
@@ -764,8 +810,7 @@ def test_api_rejects_invalid_ids_and_payloads(tmp_path: Path) -> None:
         assert client.post("/api/sessions", json={"channel_type": "unknown"}).status_code == 422
         assert client.post("/api/sessions", json={"channel_type": "telephony"}).status_code == 422
 
-        started = client.post("/api/sessions", json={})
-        session_id = started.json()["session"]["session_id"]
+        session_id = _start_session(client)
         invalid_message = _message_payload(session_id)
         invalid_message["message_text"] = " "
         assert (
@@ -780,11 +825,11 @@ def test_api_rejects_invalid_ids_and_payloads(tmp_path: Path) -> None:
 def test_api_rejects_mismatched_and_wrong_channel_message(tmp_path: Path) -> None:
     app = create_app(f"sqlite:///{(tmp_path / 'mismatch.sqlite3').as_posix()}")
     with TestClient(app) as client:
-        started = client.post("/api/sessions", json={"channel_type": "text_web"})
-        session_id = started.json()["session"]["session_id"]
+        session_id = _start_session(client)
 
         mismatch = client.post(
             f"/api/sessions/{session_id}/messages",
+            headers=_token_headers(session_id),
             json=_message_payload(str(uuid4())),
         )
         assert mismatch.status_code == 422
@@ -793,6 +838,7 @@ def test_api_rejects_mismatched_and_wrong_channel_message(tmp_path: Path) -> Non
         wrong_channel["channel_type"] = "browser_voice"
         response = client.post(
             f"/api/sessions/{session_id}/messages",
+            headers=_token_headers(session_id),
             json=wrong_channel,
         )
         assert response.status_code == 422
@@ -801,23 +847,25 @@ def test_api_rejects_mismatched_and_wrong_channel_message(tmp_path: Path) -> Non
 def test_api_rejects_message_after_close_and_duplicate_end(tmp_path: Path) -> None:
     app = create_app(f"sqlite:///{(tmp_path / 'closed.sqlite3').as_posix()}")
     with TestClient(app) as client:
-        started = client.post("/api/sessions", json={})
-        session_id = started.json()["session"]["session_id"]
+        session_id = _start_session(client)
 
         ended = client.post(
             f"/api/sessions/{session_id}/end",
+            headers=_token_headers(session_id),
             json={"outcome": "cancelled"},
         )
         assert ended.status_code == 200
 
         message_result = client.post(
             f"/api/sessions/{session_id}/messages",
+            headers=_token_headers(session_id),
             json=_message_payload(session_id),
         )
         assert message_result.status_code == 409
 
         duplicate_end = client.post(
             f"/api/sessions/{session_id}/end",
+            headers=_token_headers(session_id),
             json={"outcome": "cancelled"},
         )
         assert duplicate_end.status_code == 409
@@ -826,9 +874,10 @@ def test_api_rejects_message_after_close_and_duplicate_end(tmp_path: Path) -> No
 def test_status_endpoint_does_not_expose_transcript(tmp_path: Path) -> None:
     app = create_app(f"sqlite:///{(tmp_path / 'status.sqlite3').as_posix()}")
     with TestClient(app) as client:
-        started = client.post("/api/sessions", json={})
-        session_id = started.json()["session"]["session_id"]
-        response = client.get(f"/api/sessions/{session_id}")
+        session_id = _start_session(client)
+        response = client.get(
+            f"/api/sessions/{session_id}", headers=_token_headers(session_id)
+        )
 
     assert response.status_code == 200
     assert "messages" not in response.json()
@@ -858,11 +907,12 @@ def test_separate_client_connection_reads_persisted_session(tmp_path: Path) -> N
     database_url = f"sqlite:///{database_path.as_posix()}"
     session_id: UUID
     with TestClient(create_app(database_url)) as client:
-        response = client.post("/api/sessions", json={})
-        session_id = UUID(response.json()["session"]["session_id"])
+        session_id = _start_session(client)
 
     with TestClient(create_app(database_url)) as reopened_client:
-        response = reopened_client.get(f"/api/sessions/{session_id}")
+        response = reopened_client.get(
+            f"/api/sessions/{session_id}", headers=_token_headers(session_id)
+        )
 
     assert response.status_code == 200
     assert response.json()["session_id"] == str(session_id)
@@ -879,10 +929,12 @@ def test_concurrent_sessions_have_strict_data_and_handoff_isolation(
         res_a = client.post("/api/sessions", json={"channel_type": "text_web"})
         assert res_a.status_code == 201
         session_a = res_a.json()["session"]["session_id"]
+        _session_tokens[session_a] = res_a.json()["access_token"]
 
         res_b = client.post("/api/sessions", json={"channel_type": "text_web"})
         assert res_b.status_code == 201
         session_b = res_b.json()["session"]["session_id"]
+        _session_tokens[session_b] = res_b.json()["access_token"]
         assert session_a != session_b
 
         payload_a1 = {
@@ -893,7 +945,11 @@ def test_concurrent_sessions_have_strict_data_and_handoff_isolation(
             "modality": "text",
             "message_text": "I want to speak with a human.",
         }
-        res_a1 = client.post(f"/api/sessions/{session_a}/messages", json=payload_a1)
+        res_a1 = client.post(
+            f"/api/sessions/{session_a}/messages",
+            headers=_token_headers(session_a),
+            json=payload_a1,
+        )
         assert res_a1.status_code == 200
         assert (
             "Would you like me to create a queued support ticket"
@@ -908,7 +964,11 @@ def test_concurrent_sessions_have_strict_data_and_handoff_isolation(
             "modality": "text",
             "message_text": "yes",
         }
-        res_b1 = client.post(f"/api/sessions/{session_b}/messages", json=payload_b1)
+        res_b1 = client.post(
+            f"/api/sessions/{session_b}/messages",
+            headers=_token_headers(session_b),
+            json=payload_b1,
+        )
         assert res_b1.status_code == 200
         assert (
             res_b1.json()["assistant_message"]["text"]
@@ -923,7 +983,11 @@ def test_concurrent_sessions_have_strict_data_and_handoff_isolation(
             "modality": "text",
             "message_text": "yes",
         }
-        res_a2 = client.post(f"/api/sessions/{session_a}/messages", json=payload_a2)
+        res_a2 = client.post(
+            f"/api/sessions/{session_a}/messages",
+            headers=_token_headers(session_a),
+            json=payload_a2,
+        )
         assert res_a2.status_code == 200
         assert (
             "Your support ticket has been queued. Your ticket ID is"
