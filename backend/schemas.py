@@ -68,6 +68,7 @@ class SessionStartResponse(BaseModel):
 
     session: SessionStatusResponse
     assistant_disclosure: str
+    access_token: str
 
 
 class SessionMessageResponse(BaseModel):

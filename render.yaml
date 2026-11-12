@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: techohub-api
+    env: python
+    region: ohio
+    plan: free
+    rootDirectory: .
+    buildCommand: "pip install -r requirements.render.txt"
+    startCommand: "python -m uvicorn backend.main:create_app --factory --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      - key: TECHOHUB_RAG_ENABLED
+        value: "false"
+      - key: TECHOHUB_RAG_PROVIDER
+        value: "lexical"
+      - key: TECHOHUB_MCP_ENABLED
+        value: "false"
+      - key: TECHOHUB_CORS_ORIGINS
+        value: "https://techohub.vercel.app"
+      - key: GROQ_API_KEY
+        sync: false

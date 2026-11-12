@@ -1,4 +1,6 @@
-const API_ROOT = "/api";
+export const API_ROOT = (import.meta.env.VITE_API_BASE_URL || "/api").replace(
+  /\/+$/,
+  "");
 
 export class ApiError extends Error {
   constructor(status) {
@@ -6,6 +8,14 @@ export class ApiError extends Error {
     this.name = "ApiError";
     this.status = status;
   }
+}
+
+function sessionHeaders(accessToken) {
+  const headers = {};
+  if (accessToken) {
+    headers["X-Session-Token"] = accessToken;
+  }
+  return headers;
 }
 
 async function request(path, options = {}) {
@@ -41,8 +51,10 @@ export function getServices() {
   return request("/services");
 }
 
-export function getSessionStatus(sessionId) {
-  return request(`/sessions/${encodeURIComponent(sessionId)}`);
+export function getSessionStatus(sessionId, accessToken) {
+  return request(`/sessions/${encodeURIComponent(sessionId)}`, {
+    headers: sessionHeaders(accessToken),
+  });
 }
 
 export function sendMessage({
@@ -52,9 +64,11 @@ export function sendMessage({
   modality = "text",
   language,
   asrConfidence,
+  accessToken,
 }) {
   return request(`/sessions/${encodeURIComponent(sessionId)}/messages`, {
     method: "POST",
+    headers: sessionHeaders(accessToken),
     body: JSON.stringify({
       session_id: sessionId,
       trace_id: crypto.randomUUID(),
@@ -68,9 +82,10 @@ export function sendMessage({
   });
 }
 
-export function endSession(sessionId) {
+export function endSession(sessionId, accessToken) {
   return request(`/sessions/${encodeURIComponent(sessionId)}/end`, {
     method: "POST",
+    headers: sessionHeaders(accessToken),
     body: JSON.stringify({ outcome: "cancelled" }),
   });
 }
@@ -87,6 +102,9 @@ export function safeErrorMessage(error, action) {
   }
   if (error.status === 409) {
     return "This conversation has ended. Start a new conversation to continue.";
+  }
+  if (error.status === 401) {
+    return "This conversation session is no longer valid. Start a new conversation.";
   }
   if (error.status === 422) {
     return "That message could not be accepted. Edit it and try again.";

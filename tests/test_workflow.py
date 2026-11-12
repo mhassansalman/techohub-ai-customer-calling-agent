@@ -42,6 +42,16 @@ from backend.models import (
 from backend.rag import RagRetriever
 from backend.workflow import ConversationWorkflow, _handoff_confirmation_decision
 
+# Per-session access tokens issued at session start. Session-scoped endpoints
+# now require the X-Session-Token header, so tests capture the token returned
+# by session creation and forward it on every subsequent request.
+_session_tokens: dict[UUID, str] = {}
+
+
+def _token_headers(session_id: UUID) -> dict[str, str]:
+    token = _session_tokens.get(session_id)
+    return {"X-Session-Token": token} if token else {}
+
 
 class UnavailableGroq:
     def __init__(self, code: ProviderErrorCode = ProviderErrorCode.MISSING_API_KEY):
@@ -84,10 +94,17 @@ def _create_app(tmp_path: Path, classifier=None):
 def _start_session(client: TestClient) -> UUID:
     response = client.post("/api/sessions", json={"channel_type": "text_web"})
     assert response.status_code == 201
-    return UUID(response.json()["session"]["session_id"])
+    body = response.json()
+    session_id = UUID(body["session"]["session_id"])
+    _session_tokens[session_id] = body["access_token"]
+    return session_id
 
 
 def _send(client: TestClient, session_id: UUID, text: str):
+    headers = {}
+    token = _session_tokens.get(session_id)
+    if token:
+        headers["X-Session-Token"] = token
     return client.post(
         f"/api/sessions/{session_id}/messages",
         json={
@@ -98,6 +115,7 @@ def _send(client: TestClient, session_id: UUID, text: str):
             "modality": "text",
             "message_text": text,
         },
+        headers=headers,
     )
 
 
@@ -568,10 +586,12 @@ def test_browser_voice_and_typed_turns_keep_same_response_contract(
 ) -> None:
     app = _create_app(tmp_path)
     with TestClient(app) as client:
-        session_id = client.post(
+        started = client.post(
             "/api/sessions",
             json={"channel_type": "browser_voice"},
-        ).json()["session"]["session_id"]
+        )
+        session_id = started.json()["session"]["session_id"]
+        _session_tokens[session_id] = started.json()["access_token"]
         responses = []
         for modality, message in (
             ("speech_transcript", "Are you open on Sunday?"),
@@ -579,6 +599,7 @@ def test_browser_voice_and_typed_turns_keep_same_response_contract(
         ):
             response = client.post(
                 f"/api/sessions/{session_id}/messages",
+                headers=_token_headers(session_id),
                 json={
                     "session_id": session_id,
                     "trace_id": str(uuid4()),
@@ -989,6 +1010,7 @@ def test_unknown_closed_and_invalid_classifier_sessions_are_safe(
         session_id = _start_session(client)
         ended = client.post(
             f"/api/sessions/{session_id}/end",
+            headers=_token_headers(session_id),
             json={"outcome": "unresolved"},
         )
         assert ended.status_code == 200
@@ -1000,7 +1022,9 @@ def test_persisted_response_audit_and_openapi_contract(tmp_path: Path) -> None:
     with TestClient(app) as client:
         session_id = _start_session(client)
         response = _send(client, session_id, "How much is a haircut?")
-        status_response = client.get(f"/api/sessions/{session_id}")
+        status_response = client.get(
+            f"/api/sessions/{session_id}", headers=_token_headers(session_id)
+        )
         openapi = client.get("/openapi.json").json()
 
         with app.state.session_factory() as db:
