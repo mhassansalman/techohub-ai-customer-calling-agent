@@ -986,3 +986,387 @@ kbd {
     transition-duration: .01ms !important;
   }
 }
+
+/* ---------- Architecture / workflow page ---------- */
+.arch-page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px 18px 40px;
+  color: #202b28;
+  font-family: "Segoe UI", sans-serif;
+}
+
+.arch-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.arch-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  appearance: none;
+  border: 1px solid #c9c4b8;
+  background: #fff;
+  color: #202b28;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.arch-back:hover {
+  border-color: #2563eb;
+  color: #2563eb;
+}
+
+.arch-back span:first-child {
+  font-size: 16px;
+}
+
+.arch-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: #202b28;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.arch-brand .arch-wordmark-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.arch-brand .arch-wordmark-period {
+  color: #b91c1c;
+}
+
+.arch-header-copy h1 {
+  margin: 0 0 6px;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+.arch-lead {
+  margin: 0;
+  font-size: 14px;
+  color: #5b6460;
+  max-width: 620px;
+}
+
+.arch-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 26px;
+  border-bottom: 1px solid #dcd6c9;
+  padding-bottom: 10px;
+}
+
+.arch-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: #7a827e;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 6px 6px 0 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.arch-tab:hover {
+  color: #202b28;
+  background: #f3f0e9;
+}
+
+.arch-tab-active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+  background: #eff6ff;
+}
+
+.arch-section {
+  margin-bottom: 34px;
+}
+
+.arch-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0 0 10px;
+  color: #202b28;
+}
+
+.arch-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.arch-section-lead {
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  color: #5b6460;
+  max-width: 700px;
+}
+
+.arch-flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.arch-flow-node {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 150px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #bfd7ee;
+  background: #eff6ff;
+  color: #1d3a5c;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.arch-flow-node.variant-local {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.arch-flow-node.variant-future {
+  border-color: #fddebd;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.arch-flow-node .arch-sub {
+  font-weight: 400;
+  opacity: 0.85;
+  font-size: 11.5px;
+}
+
+.arch-flow-arrow {
+  width: 26px;
+  height: 10px;
+  flex-shrink: 0;
+}
+
+.arch-flow-note {
+  margin: 0;
+  font-size: 12.5px;
+  color: #7a827e;
+  max-width: 700px;
+}
+
+.arch-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.arch-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 200px;
+  min-width: 200px;
+  max-width: 300px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid #dcd6c9;
+  background: #fff;
+  color: #202b28;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.arch-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.arch-card-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.arch-card-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #202b28;
+}
+
+.arch-card-body {
+  margin: 0;
+  color: #5b6460;
+}
+
+.arch-card-note {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  color: #7a827e;
+  font-style: italic;
+}
+
+.arch-branches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.arch-branch {
+  flex: 1 1 300px;
+  min-width: 300px;
+  max-width: 460px;
+  padding: 16px 18px;
+  border-radius: 10px;
+  border: 1px solid #bfd7ee;
+  background: #eff6ff;
+}
+
+.arch-branch-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: #1d3a5c;
+}
+
+.arch-branch-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.arch-branch-dot.local {
+  background: #15803d;
+}
+
+.arch-branch-dot.core {
+  background: #2563eb;
+}
+
+.arch-branch-body ul {
+  margin: 0;
+  padding-left: 16px;
+  color: #5b6460;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.arch-branch-body li {
+  margin-bottom: 6px;
+}
+
+.arch-branch-body li:last-child {
+  margin-bottom: 0;
+}
+
+.arch-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 30px;
+  padding-top: 18px;
+  border-top: 1px solid #dcd6c9;
+  font-size: 12.5px;
+  color: #7a827e;
+}
+
+.arch-footer a {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.arch-footer a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+  .arch-page {
+    padding: 16px 14px 32px;
+  }
+  .arch-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .arch-tabs {
+    overflow-x: auto;
+    padding-bottom: 8px;
+    margin-bottom: 20px;
+    scrollbar-width: none;
+  }
+  .arch-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .arch-tab {
+    flex-shrink: 0;
+  }
+  .arch-flow {
+    gap: 8px;
+  }
+  .arch-flow-node {
+    min-width: 120px;
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+  .arch-flow-arrow {
+    width: 22px;
+  }
+  .arch-grid,
+  .arch-branches {
+    flex-direction: column;
+  }
+  .arch-card,
+  .arch-branch {
+    min-width: auto;
+    max-width: none;
+  }
+}

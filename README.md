@@ -199,3 +199,12 @@ and does not call this application’s backend.
 - [Architecture decisions and open questions](docs/12_ARCHITECTURE_DECISIONS_AND_OPEN_QUESTIONS.md)
 - [Implementation dependency order](docs/13_IMPLEMENTATION_SEQUENCE_AND_DEPENDENCIES.md)
 - [Active V2 traceable backlog](assignment/04_Revised_Traceable_Backlog_v2.md)
+
+## How TECHOHUB works (architecture page)
+
+The frontend includes a static "How TECHOHUB works" architecture/workflow page
+that walks through the customer request pipeline end to end: customer entry
+(Message / Mic / Live Call / Call-Only), channel-to-backend handoff, intent and
+routing, simple vs complex paths, knowledge/OKF retrieval, MCP, response output,
+and safety constraints. Open it from the experience picker via "View how
+TECHOHUB works" and return to the assistant with the back button.

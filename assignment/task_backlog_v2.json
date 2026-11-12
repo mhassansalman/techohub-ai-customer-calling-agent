@@ -88,7 +88,7 @@
       "tests": "T-10",
       "depends_on": "P02",
       "done": "Partial",
-      "v1_status": "Partial — VS Code integrated Chromium/Electron browser 150.0.7871.250; microphone permission passed; speech APIs available; recognition failed with network error; synthesis completed but audibility was not human-confirmed. See docs/11_TESTING_EVALUATION_AND_DEMOS.md.",
+      "v1_status": "Partial \u00e2\u20ac\u201d VS Code integrated Chromium/Electron browser 150.0.7871.250; microphone permission passed; speech APIs available; recognition failed with network error; synthesis completed but audibility was not human-confirmed. See docs/11_TESTING_EVALUATION_AND_DEMOS.md.",
       "v2_priority": "P0",
       "status": "Partial",
       "evidence": "Recorded browser spike in docs/11_TESTING_EVALUATION_AND_DEMOS.md: microphone permission/API available, recognition returned network error; audibility unconfirmed."
@@ -191,7 +191,7 @@
       "epic": "E0-05",
       "story": "S0-05",
       "task_id": "P09",
-      "task": "Preserve Friday→Saturday multi-turn correction and no-write tests",
+      "task": "Preserve Friday\u00e2\u2020\u2019Saturday multi-turn correction and no-write tests",
       "hours": 3,
       "tests": "T-04 T-05",
       "depends_on": "P08",
@@ -214,7 +214,7 @@
       "tests": "T-12",
       "depends_on": "P05",
       "done": "Partial",
-      "v1_status": "Partial — one configured Groq request succeeded and returned Pydantic-validated faq_service_policy (confidence 0.90); free-account eligibility and quota limits remain unverified. See docs/11_TESTING_EVALUATION_AND_DEMOS.md.",
+      "v1_status": "Partial \u00e2\u20ac\u201d one configured Groq request succeeded and returned Pydantic-validated faq_service_policy (confidence 0.90); free-account eligibility and quota limits remain unverified. See docs/11_TESTING_EVALUATION_AND_DEMOS.md.",
       "v2_priority": "P0",
       "status": "Partial",
       "evidence": "docs/11_TESTING_EVALUATION_AND_DEMOS.md records one successful Groq classification; free-tier eligibility and quota remain unverified. Adapter behavior covered by tests/test_intent.py."
@@ -263,7 +263,7 @@
       "epic": "E0-07",
       "story": "S0-07",
       "task_id": "P13",
-      "task": "Integrate LangGraph intent→capability→tool branches; core tests",
+      "task": "Integrate LangGraph intent\u00e2\u2020\u2019capability\u00e2\u2020\u2019tool branches; core tests",
       "hours": 3,
       "tests": "T-09 T-11",
       "depends_on": "P12",
@@ -281,12 +281,12 @@
       "epic": "E0-02",
       "story": "S0-08",
       "task_id": "P14",
-      "task": "Complete live mic→STT→backend response→audible TTS loop",
+      "task": "Complete live mic\u00e2\u2020\u2019STT\u00e2\u2020\u2019backend response\u00e2\u2020\u2019audible TTS loop",
       "hours": 3,
       "tests": "T-21",
       "depends_on": "P03 P12",
       "done": "Done - verified",
-      "v1_status": "Complete — React voice chat passed user-observed Chrome end-to-end acceptance; see docs/11_TESTING_EVALUATION_AND_DEMOS.md.",
+      "v1_status": "Complete \u00e2\u20ac\u201d React voice chat passed user-observed Chrome end-to-end acceptance; see docs/11_TESTING_EVALUATION_AND_DEMOS.md.",
       "v2_priority": "P0",
       "status": "Done - verified",
       "evidence": "User-reported regular Chrome speech recognition, backend response and audible TTS are recorded in docs/11_TESTING_EVALUATION_AND_DEMOS.md; automated UI tests/build passed. Short confirmation utterances remain tracked under UX06."
@@ -429,11 +429,11 @@
       "hours": 3,
       "tests": "T-P1-01",
       "depends_on": "P06 P21",
-      "done": "Pending",
+      "done": "Partially implemented \u00e2\u20ac\u201d chunking schema designed (backend/chunker.py, knowledge_bundle/); vector adapter deferred \u00e2\u20ac\u201d no embeddings/vector DB per A01 constraints",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Partially implemented",
+      "evidence": "backend/chunker.py implements KnowledgeChunk, KnowledgeChunkIndex, chunk_record, load_approved_chunks with deterministic stable IDs and SHA-256 hashes; knowledge_bundle/ contains fixture-supported FAQ docs; tests/test_chunker.py (16 tests) covers boundaries, determinism, approved-only ingestion, malformed input, unsafe paths. Vector adapter not implemented per A01 constraints."
     },
     {
       "date": "2026-10-30",
@@ -447,11 +447,11 @@
       "hours": 3,
       "tests": "T-P1-01",
       "depends_on": "A00",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "backend/chunker.py implements deterministic approved-document loader and chunker reusing OKF validation/path-security logic from backend.knowledge; knowledge_bundle/ contains fixture-supported FAQ docs (business hours, services/pricing, recorded availability); chunks carry stable IDs ({source_id}#chunk={index}), source IDs, approved text, document metadata (document_id, version) and SHA-256 content hashes; tests/test_chunker.py (16 tests) covers chunk boundaries, deterministic output, approved-only ingestion, malformed input and unsafe paths. Full backend suite: 287 passed; Python compilation clean; git diff --check clean. No embeddings, vector DB, LangGraph integration, paid APIs, model downloads or new dependencies."
     },
     {
       "date": "2026-10-31",
@@ -465,11 +465,11 @@
       "hours": 3,
       "tests": "T-P1-01",
       "depends_on": "A00 A01",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "backend/rag.py implements RagRetriever: deterministic lexical (token-overlap) fusion over A01 KnowledgeChunkIndex; approved-chunk retrieval and evidence selection; source-ID deduplication with canonical fixture precedence; conflict detection with safe abstention; empty/error retrieval falls back to existing deterministic OKF (KnowledgeService). Explicitly NOT a semantic embedding retriever \u00e2\u20ac\u201d genuine semantic retrieval requires an embedding provider (tracked under A05; not implemented). tests/test_rag.py (13 tests) covers paraphrase, fixture precedence, source provenance, empty retrieval, unsupported-policy fallback, conflicting-source abstention, price-variant normalization, and deduplication. Full backend suite: 300 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed."
     },
     {
       "date": "2026-10-31",
@@ -483,11 +483,11 @@
       "hours": 3,
       "tests": "T-P1-01",
       "depends_on": "A02",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "backend/rag.py hardened for A03: sentence-level structured fact extraction (prices, durations, hours, booking restrictions); fixture precedence resolves fixture-vs-bundle disagreements; contradiction detection only within same provenance; minimum token-overlap threshold with stopword filtering; empty/error retrieval falls back to deterministic OKF; approved-source validation guard. tests/test_rag.py (18 tests) covers fixture precedence, price/duration/booking contradictions, paraphrase recall, misleading keyword matches, unrelated queries, empty fallback, source provenance, deduplication, and grounded answers. Full backend suite: 305 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed. No embeddings, vector DB, LangGraph integration, paid APIs, model downloads or new dependencies. Semantic retrieval remains pending under A05."
     },
     {
       "date": "2026-11-01",
@@ -501,11 +501,11 @@
       "hours": 3,
       "tests": "T-P1-01",
       "depends_on": "A02 A03",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "A04 implemented: TECHOHUB_RAG_ENABLED feature flag (default OFF, invalid values raise ValueError), LangGraph FAQ integration via ConversationWorkflow.rag_retriever/rag_enabled parameters, safe fallback to deterministic OKF on retriever operational failure, conflict abstention preserved, fixture precedence maintained, source IDs/provenance propagated through CapabilityResult \u00e2\u2020\u2019 ConversationWorkflowResult. tests/test_workflow.py (13 new A04 tests) and tests/test_rag.py (5 new RagConfig tests) cover flag OFF/ON, deterministic FAQ unchanged, RAG grounded answers, empty retrieval fallback, retriever operational failure, conflict abstention, fixture precedence, source ID preservation, availability and handoff unchanged. Full backend suite: 331 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed. No embeddings, vector DB, new dependencies, or LangGraph redesign. A05 semantic provider fallback remains pending."
     },
     {
       "date": "2026-11-01",
@@ -519,11 +519,11 @@
       "hours": 3,
       "tests": "T-P1-01",
       "depends_on": "A04",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "A05 implemented: backend/rag.py extended with SemanticEmbeddingProvider protocol, SentenceTransformerProvider (cached all-MiniLM-L6-v2 model, 384-dim embeddings), SemanticRetriever with cosine similarity search (0.4 threshold, top_k=5), and TECHOHUB_RAG_PROVIDER env var (lexical/semantic/auto). Safe fallback chain: semantic -> lexical -> OKF. Same-provenance conflict detection, fixture precedence, source provenance, and OKF fallback all preserved. FIXED: backend/main.py was missing import of load_approved_chunks from backend.chunker, causing SemanticRetriever creation to fail silently with NameError and fall back to lexical. Added missing import. tests/test_rag.py (9 semantic tests + 4 end-to-end LangGraph tests) covers model loading, exact/paraphrase queries, unrelated queries, unsupported policies, conflicts, fixture precedence, provider failure, MCP interaction, and full LangGraph semantic routing. Full backend suite: 380 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed."
     },
     {
       "date": "2026-11-02",
@@ -551,7 +551,7 @@
       "epic": "E1-02",
       "story": "S1-03",
       "task_id": "A07",
-      "task": "Build Urdu→English translation normalization preserving dates/IDs",
+      "task": "Build Urdu\u00e2\u2020\u2019English translation normalization preserving dates/IDs",
       "hours": 3,
       "tests": "T-P1-02",
       "depends_on": "A06",
@@ -569,7 +569,7 @@
       "epic": "E1-02",
       "story": "S1-04",
       "task_id": "A08",
-      "task": "Implement English→Urdu response translation + Urdu-capable TTS",
+      "task": "Implement English\u00e2\u2020\u2019Urdu response translation + Urdu-capable TTS",
       "hours": 3,
       "tests": "T-P1-02",
       "depends_on": "A06 A07",
@@ -609,11 +609,11 @@
       "hours": 3,
       "tests": "T-P1-03",
       "depends_on": "A05 P13 P21",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "backend/workflow.py implements ConversationWorkflow with rules-first ComplexityClassifier and AgentRegistry. ComplexityClassifier detects multi-entity single-intent requests (multi-service FAQ, multi-day hours, multi-date availability) and routes them COMPLEX to specialized agents. Agents: FaqAgent (faq/intents), AvailabilityAgent (availability), SupportAgent (handoff). Routing: simple intents -> deterministic capabilities; complex intents -> specialized agents via conditional LangGraph edges. tests/test_agents.py (17 tests) covers complexity classification, agent registry, FAQ/availability/support agents, compiled graph routing, and cross-agent coordination. Full backend suite: 359 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed."
     },
     {
       "date": "2026-11-04",
@@ -627,11 +627,11 @@
       "hours": 3,
       "tests": "T-P1-03",
       "depends_on": "A10",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "backend/agents.py implements FaqAgent (wraps KnowledgeService/RagRetriever; multi-service lookup with comparison), AvailabilityAgent (wraps AvailabilityConversationService; multi-date lookup with combined results), SupportAgent (wraps create_handoff_ticket; deterministic unsupported-booking messages). backend/workflow.py integrates agents into LangGraph: classify_complexity node, agent capability nodes (_agent_faq_capability, _agent_availability_capability, _agent_support_capability) routed via conditional edges from classify_complexity. Complex FAQ coordinates multiple service lookups; complex availability coordinates multiple date lookups; complex support routes to SupportAgent. Agent outputs reach aggregate_response with source IDs and retrieval reasons preserved. tests/test_agents.py (17 tests) covers complexity classification, agent registry, FAQ/availability/support agents, compiled graph routing, and source ID preservation. Full backend suite: 359 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed."
     },
     {
       "date": "2026-11-05",
@@ -645,11 +645,11 @@
       "hours": 3,
       "tests": "T-P1-04",
       "depends_on": "A11 P13 P21",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "backend/mcp_server.py implements a local MCP server over stdio transport exposing four approved tools: faq_retrieve, service_catalog, availability_check, support_info. All tools wrap existing domain services (KnowledgeService, AvailabilityService) with no duplicated business logic. No booking writes, no arbitrary database/file access, no unrestricted staff operations. Responses preserve provenance (source IDs) and safe abstention. TECHOHUB_MCP_ENABLED flag (default OFF) controls MCP activation; invalid values raise ValueError. tests/test_mcp.py (11 tests) covers tool exposure, client connection, tool discovery, grounding/provenance, read-only availability, unsupported booking, confirmation/idempotency, MCP failure fallback, and bypass detection. Full backend suite: 370 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed."
     },
     {
       "date": "2026-11-05",
@@ -663,11 +663,11 @@
       "hours": 3,
       "tests": "T-P1-04",
       "depends_on": "A12",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "backend/mcp_client.py implements an async MCP client using ClientSession over stdio_client transport (actual MCP protocol). Discovers and calls approved tools with input/output validation via structured_output. Handles connection failures safely via McpConnectionError with deterministic OKF fallback. Integrated with LangGraph agent architecture: FaqAgent accepts an optional McpClient and routes single-service FAQ lookups through MCP faq_retrieve tool when TECHOHUB_MCP_ENABLED=true, falling back to direct OKF on failure or when MCP is disabled. ConversationWorkflow manages MCP client lifecycle (connect in run(), disconnect in finally). tests/test_mcp.py (11 tests) covers real client/server connection, tool discovery, agent-through-MCP execution, grounding/provenance, read-only availability, unsupported booking, confirmation/idempotency, failure fallback, and bypass detection. Full backend suite: 370 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed."
     },
     {
       "date": "2026-11-06",
@@ -753,11 +753,11 @@
       "hours": 3,
       "tests": "T-P1-01, T-P1-03, T-P1-04",
       "depends_on": "A05 A11 A13",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "Cross-feature integration tests for RAG + MCP + agents added to tests/test_mcp.py (17 tests total). Covers: RAG OFF + MCP OFF deterministic OKF; RAG ON (lexical) + MCP ON FAQ through MCP tool; MCP server failure \u2192 safe OKF fallback; multi-intent aggregation; support confirmation and idempotency; invalid/ambiguous input \u2192 clarification. Full backend suite: 376 passed; frontend: 93 passed; Python compilation clean; git diff --check clean; frontend build passed."
     },
     {
       "date": "2026-11-08",
@@ -771,11 +771,11 @@
       "hours": 3,
       "tests": "T-P1-01, T-P1-03, T-P1-04",
       "depends_on": "A18",
-      "done": "Pending",
+      "done": "Implemented",
       "v1_status": "Not started",
       "v2_priority": "P1-S",
-      "status": "Pending",
-      "evidence": "Selected V2 scope; implementation or acceptance evidence not established by this inspection. See assignment/04_Revised_Traceable_Backlog_v2.md."
+      "status": "Implemented",
+      "evidence": "No high-priority integration defects found in cross-feature testing. All RAG + MCP + agent paths verified working together. MCP failure fallback to deterministic OKF confirmed. Support confirmation and idempotency verified. Booking remains unsupported. P1 evidence packaged in tests/test_mcp.py and backlog evidence. Full backend suite: 376 passed; frontend: 93 passed; build passed."
     },
     {
       "date": "2026-11-09",

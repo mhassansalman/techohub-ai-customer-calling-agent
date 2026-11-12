@@ -7,6 +7,7 @@ import {
   safeErrorMessage,
   sendMessage,
 } from "./api.js";
+import ArchitecturePage from "./Architecture.jsx";
 
 function toDisplayMessage(message) {
   return {
@@ -63,6 +64,7 @@ export default function App() {
   const [voiceFeedback, setVoiceFeedback] = useState("");
   const [voiceFeedbackIsError, setVoiceFeedbackIsError] = useState(false);
   const [interactionMode, setInteractionMode] = useState("mic");
+  const [viewArchitecture, setViewArchitecture] = useState(false);
   const [liveCallTtsFinished, setLiveCallTtsFinished] = useState(false);
   const [servicesOpen, setServicesOpen] = useState(false);
   const [services, setServices] = useState([]);
@@ -799,7 +801,7 @@ export default function App() {
         }
 
         if (!recognitionFailed || recognitionErrorCode === "no-speech") {
-          if (liveCallNoSpeechRecoveryCountRef.current < 1) {
+          if (liveCallNoSpeechRecoveryCountRef.current < 3) {
             liveCallNoSpeechRecoveryCountRef.current += 1;
             liveCallStartRequestedRef.current = true;
             updateVoiceFeedback("No speech was recognized. Listening again.");
@@ -877,6 +879,12 @@ export default function App() {
 
   const canCompose = callActive && !busy && !listening;
 
+  if (viewArchitecture) {
+    return (
+      <ArchitecturePage onBack={() => setViewArchitecture(false)} />
+    );
+  }
+
   if (!experience) {
     return (
       <main className="page-shell">
@@ -911,6 +919,14 @@ export default function App() {
             >
               <strong>Call-Only Assistant</strong>
               <span>Have a speech-first conversation with spoken replies.</span>
+            </button>
+            <button
+              type="button"
+              className="experience-cta"
+              onClick={() => setViewArchitecture(true)}
+            >
+              <span>View how TECHOHUB works</span>
+              <span className="experience-cta-sub">System architecture &amp; workflow</span>
             </button>
           </div>
           <p className="experience-note">

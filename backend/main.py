@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from backend.availability import AvailabilityConversationService
 from backend.channels import ChannelType, CustomerRequest
+from backend.chunker import load_approved_chunks
 from backend.database import (
     Base,
     create_database_engine,
@@ -29,6 +30,7 @@ from backend.intent import (
     RuleFirstIntentClassifier,
 )
 from backend.knowledge import KnowledgeService
+from backend.rag import RagConfig, RagRetriever, SemanticRetriever, SentenceTransformerProvider
 from backend.models import (
     AuditEvent,
     ConversationSession,
@@ -58,6 +60,7 @@ from backend.session_service import (
     start_session,
 )
 from backend.workflow import ConversationWorkflow, WorkflowExecutionError
+from backend.mcp_client import McpConfig
 
 
 logger = logging.getLogger(__name__)
@@ -146,6 +149,30 @@ def create_app(
     )
     app.state.database_engine = engine
     app.state.session_factory = session_factory
+    if workflow is None:
+        rag_config = RagConfig.from_environment()
+        lexical_retriever = RagRetriever() if rag_config.enabled else None
+        semantic_retriever = None
+        if rag_config.enabled and rag_config.provider in {"semantic", "auto"}:
+            try:
+                semantic_retriever = SemanticRetriever(
+                    index=load_approved_chunks(),
+                    provider=SentenceTransformerProvider(),
+                )
+            except Exception:
+                # Semantic provider unavailable; fall back to lexical only.
+                semantic_retriever = None
+        if (
+            rag_config.enabled
+            and rag_config.provider == "semantic"
+            and semantic_retriever is None
+        ):
+            # Semantic was explicitly requested but unavailable; degrade to lexical.
+            semantic_retriever = None
+    else:
+        rag_config = None
+        lexical_retriever = None
+        semantic_retriever = None
     if workflow is not None and classifier is not None:
         raise ValueError("pass either workflow or classifier, not both")
     app.state.conversation_workflow = workflow or ConversationWorkflow(
@@ -155,6 +182,12 @@ def create_app(
         ),
         knowledge=KnowledgeService(),
         availability=AvailabilityConversationService(),
+        rag_retriever=semantic_retriever,
+        lexical_retriever=lexical_retriever,
+        semantic_retriever=semantic_retriever,
+        rag_enabled=rag_config.enabled if rag_config else False,
+        rag_provider=rag_config.provider if rag_config else "lexical",
+        mcp_enabled=McpConfig.from_environment().enabled,
     )
 
     def get_db() -> Generator[Session, None, None]:

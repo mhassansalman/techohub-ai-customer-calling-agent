@@ -15,6 +15,15 @@ from backend.availability import (
     AvailabilityResponse,
     AvailabilityStatus,
 )
+from backend.agents import (
+    AgentRegistry,
+    AvailabilityAgent,
+    Complexity,
+    ComplexityAssessment,
+    ComplexityClassifier,
+    FaqAgent,
+    SupportAgent,
+)
 from backend.channels import CustomerRequest
 from backend.intent import (
     ClassificationStatus,
@@ -25,6 +34,7 @@ from backend.intent import (
     ProviderErrorCode,
 )
 from backend.knowledge import AnswerStatus, KnowledgeAnswer, KnowledgeService
+from backend.rag import RagConfig, RagRetriever, SemanticRetriever
 from backend.models import (
     AvailabilityConversationContext,
     Message,
@@ -32,6 +42,7 @@ from backend.models import (
     PendingAvailabilityDateContext,
 )
 from backend.session_service import create_handoff_ticket
+from backend.mcp_client import McpClient, McpConfig
 
 
 HANDOFF_CONFIRMATION_PROMPT = (
@@ -45,6 +56,117 @@ HANDOFF_CONFLICT_PROMPT = (
     "I heard both yes and no. Would you like me to create a support ticket?"
 )
 
+# Conversational intent patterns - small-talk and status queries that are
+# answered directly without invoking the LangGraph capability graph.  These are
+# only matched when the message contains no business keywords, so mixed
+# requests (e.g. "hello what's the price of a haircut") still route through
+# the normal capability nodes.
+_GREETING_PHRASES = frozenset(
+    {
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "good day",
+        "greetings",
+        "goodbye",
+        "good bye",
+        "bye",
+    }
+)
+_GREETING_WORDS = frozenset({"hello", "hi", "hey", "howdy", "hiya"})
+
+_THANKS_PHRASES = frozenset(
+    {"thank you", "thank you very much", "thanks a lot", "thankyou"}
+)
+_THANKS_WORDS = frozenset({"thanks", "thx", "ty"})
+
+_ACKNOWLEDGEMENT_PHRASES = frozenset(
+    {"copy that", "got it", "gotcha"}
+)
+_ACKNOWLEDGEMENT_WORDS = frozenset(
+    {"okay", "ok", "alright", "alrighty", "roger", "understood", "yes", "no"}
+)
+
+_IDENTITY_PHRASES = frozenset(
+    {
+        "who are you",
+        "what are you",
+        "are you a bot",
+        "are you an assistant",
+        "what is your name",
+        "who is this",
+        "what is this",
+    }
+)
+
+_LISTENING_PHRASES = frozenset(
+    {
+        "are you listening",
+        "can you hear me",
+        "are you there",
+        "hello are you there",
+        "can you hear me now",
+    }
+)
+
+_SECRET_PHRASES = frozenset(
+    {
+        "api key",
+        "secret key",
+        "access key",
+        "your api key",
+        "tell me your key",
+    }
+)
+_SECRET_WORDS = frozenset({"password", "credentials", "private key"})
+
+# Business keywords that indicate the user is making a service request rather
+# than purely chatting.  If any of these appear, the message is routed through
+# the normal LangGraph capability nodes instead of being treated as
+# conversational small-talk.
+_BUSINESS_MARKERS = frozenset(
+    {
+        "appointment",
+        "appointments",
+        "booking",
+        "book",
+        "schedule",
+        "reschedule",
+        "cancel",
+        "change",
+        "hours",
+        "open",
+        "opening",
+        "close",
+        "closing",
+        "price",
+        "cost",
+        "duration",
+        "how much",
+        "service",
+        "services",
+        "availability",
+        "slot",
+        "slots",
+        "account",
+        "history",
+        "complaint",
+        "issue",
+        "problem",
+        "refund",
+        "support",
+        "human",
+        "staff",
+        "agent",
+        "talk",
+        "speak",
+        "connect",
+        "transfer",
+        "haircut",
+        "beard",
+    }
+)
+
 
 class CapabilityResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -53,6 +175,7 @@ class CapabilityResult(BaseModel):
     text: str = Field(min_length=1)
     source_ids: tuple[str, ...] = ()
     outcome: Literal["answered", "clarification", "handoff_unavailable", "unsupported"]
+    retrieval_reason: tuple[str, ...] = ()
 
 
 class ConversationWorkflowResult(BaseModel):
@@ -63,6 +186,7 @@ class ConversationWorkflowResult(BaseModel):
     classification_source: ClassifierSource
     source_ids: tuple[str, ...] = ()
     outcome: Literal["answered", "clarification", "handoff_unavailable", "unsupported"]
+    retrieval_reason: tuple[str, ...] = ()
 
 
 class WorkflowExecutionError(RuntimeError):
@@ -75,6 +199,7 @@ class ConversationState(TypedDict, total=False):
     db: Session
     has_pending_availability_context: bool
     classification: IntentClassification
+    complexity_assessment: ComplexityAssessment
     capability_results: tuple[CapabilityResult, ...]
     response: ConversationWorkflowResult
 
@@ -88,13 +213,74 @@ class ConversationWorkflow:
         classifier: IntentClassifier,
         knowledge: KnowledgeService | None = None,
         availability: AvailabilityConversationService | None = None,
+        rag_retriever: RagRetriever | None = None,
+        lexical_retriever: RagRetriever | None = None,
+        semantic_retriever: SemanticRetriever | None = None,
+        rag_enabled: bool = False,
+        rag_provider: str = "lexical",
+        mcp_enabled: bool = False,
     ) -> None:
         self.classifier = classifier
         self.knowledge = knowledge or KnowledgeService()
         self.availability = availability or AvailabilityConversationService()
+        self._rag_retriever = rag_retriever
+        self._lexical_retriever = lexical_retriever
+        self._semantic_retriever = semantic_retriever
+        self._rag_enabled = rag_enabled
+        self._rag_provider = rag_provider
+        self._mcp_enabled = mcp_enabled
+        self._mcp_client: McpClient | None = None
+        if mcp_enabled:
+            self._mcp_client = McpClient()
+        self._complexity_classifier = ComplexityClassifier()
+        self._agent_registry = AgentRegistry()
+        self._agent_registry.register(
+            Intent.FAQ_BUSINESS_HOURS,
+            FaqAgent(
+                self.knowledge,
+                self._lexical_retriever or RagRetriever(),
+                mcp_client=self._mcp_client,
+            ),
+        )
+        self._agent_registry.register(
+            Intent.APPOINTMENT_AVAILABILITY,
+            AvailabilityAgent(self.availability),
+        )
+        self._agent_registry.register(
+            Intent.HUMAN_REQUEST,
+            SupportAgent(create_handoff_ticket, self.knowledge),
+        )
         self.graph = self._build_graph()
 
     async def run(
+        self,
+        *,
+        session_id: UUID,
+        request: CustomerRequest,
+        db: Session,
+    ) -> ConversationWorkflowResult:
+        # Connect MCP client when enabled; ensure teardown on completion.
+        if self._mcp_enabled and self._mcp_client is not None:
+            await self._mcp_client.connect()
+        try:
+            if self._mcp_enabled and self._mcp_client is not None:
+                try:
+                    return await self._run_with_mcp(
+                        session_id=session_id, request=request, db=db
+                    )
+                except McpConnectionError:
+                    # MCP connection lost mid-flow; fall back to direct path.
+                    return await self._run_direct(
+                        session_id=session_id, request=request, db=db
+                    )
+            return await self._run_direct(
+                session_id=session_id, request=request, db=db
+            )
+        finally:
+            if self._mcp_client is not None:
+                await self._mcp_client.close()
+
+    async def _run_direct(
         self,
         *,
         session_id: UUID,
@@ -156,6 +342,14 @@ class ConversationWorkflow:
                     outcome="answered",
                 )
 
+            conversational = _conversational_response(request.message_text)
+            if conversational is not None:
+                return ConversationWorkflowResult(
+                    response_text=conversational,
+                    classification_source=ClassifierSource.RULES,
+                    outcome="answered",
+                )
+
             context = db.get(AvailabilityConversationContext, str(session_id))
             pending_date = db.get(
                 PendingAvailabilityDateContext,
@@ -176,6 +370,20 @@ class ConversationWorkflow:
         except Exception as error:
             raise WorkflowExecutionError("conversation workflow failed") from error
         return ConversationWorkflowResult.model_validate(state["response"])
+
+    async def _run_with_mcp(
+        self,
+        *,
+        session_id: UUID,
+        request: CustomerRequest,
+        db: Session,
+    ) -> ConversationWorkflowResult:
+        # MCP-enabled path uses the same graph execution; the FaqAgent's MCP
+        # client is already connected and will be used for single-service FAQ
+        # lookups. On MCP failure, the agent falls back to direct OKF.
+        return await self._run_direct(
+            session_id=session_id, request=request, db=db
+        )
 
     @staticmethod
     def _pending_handoff_confirmation(
@@ -221,6 +429,7 @@ class ConversationWorkflow:
     def _build_graph(self):
         builder = StateGraph(ConversationState)
         builder.add_node("classify_intent", self._classify_intent)
+        builder.add_node("classify_complexity", self._classify_complexity)
         builder.add_node("faq_capability", self._faq_capability)
         builder.add_node("availability_capability", self._availability_capability)
         builder.add_node("date_correction", self._date_correction)
@@ -228,18 +437,28 @@ class ConversationWorkflow:
         builder.add_node("multi_intent_capability", self._multi_intent_capability)
         builder.add_node("clarification", self._clarification)
         builder.add_node("aggregate_response", self._aggregate_response)
+        # A10/A11: Specialized agent nodes
+        builder.add_node("agent_faq", self._agent_faq_capability)
+        builder.add_node("agent_availability", self._agent_availability_capability)
+        builder.add_node("agent_support", self._agent_support_capability)
 
         builder.add_edge(START, "classify_intent")
+        builder.add_edge("classify_intent", "classify_complexity")
         builder.add_conditional_edges(
-            "classify_intent",
-            self._route,
+            "classify_complexity",
+            self._route_complexity,
             {
-                "faq": "faq_capability",
-                "availability": "availability_capability",
-                "date_correction": "date_correction",
-                "support": "support_capability",
-                "multi": "multi_intent_capability",
-                "clarification": "clarification",
+                # Simple path → existing capability nodes
+                "simple_faq": "faq_capability",
+                "simple_availability": "availability_capability",
+                "simple_date_correction": "date_correction",
+                "simple_support": "support_capability",
+                "simple_multi": "multi_intent_capability",
+                "simple_clarification": "clarification",
+                # Complex path → agent nodes
+                "complex_faq": "agent_faq",
+                "complex_availability": "agent_availability",
+                "complex_support": "agent_support",
             },
         )
         for node in (
@@ -249,6 +468,9 @@ class ConversationWorkflow:
             "support_capability",
             "multi_intent_capability",
             "clarification",
+            "agent_faq",
+            "agent_availability",
+            "agent_support",
         ):
             builder.add_edge(node, "aggregate_response")
         builder.add_edge("aggregate_response", END)
@@ -275,8 +497,55 @@ class ConversationWorkflow:
             )
         return {"classification": classification}
 
+    async def _classify_complexity(
+        self,
+        state: ConversationState,
+    ) -> dict[str, ComplexityAssessment]:
+        classification = state["classification"]
+        intents = classification.intents
+        if not intents:
+            return {
+                "complexity_assessment": ComplexityAssessment(
+                    complexity=Complexity.SIMPLE,
+                    reason="no_intents",
+                    agent=None,
+                )
+            }
+        assessment = self._complexity_classifier.classify(
+            state["request"], intents
+        )
+        return {"complexity_assessment": assessment}
+
     @staticmethod
-    def _route(state: ConversationState) -> str:
+    def _route_complexity(state: ConversationState) -> str:
+        assessment = state.get("complexity_assessment")
+        if assessment is None:
+            return "simple_clarification"
+        classification = state["classification"]
+        intents = classification.intents
+        if not intents or Intent.UNSUPPORTED in intents:
+            return "simple_clarification"
+        if len(intents) > 1:
+            return "simple_multi"
+        intent = intents[0]
+        if assessment.complexity == Complexity.SIMPLE:
+            if intent in {Intent.FAQ_BUSINESS_HOURS, Intent.FAQ_SERVICE_POLICY}:
+                return "simple_faq"
+            if intent is Intent.APPOINTMENT_AVAILABILITY:
+                return "simple_availability"
+            if intent is Intent.APPOINTMENT_DATE_CORRECTION:
+                return "simple_date_correction"
+            if intent in _SUPPORT_INTENTS:
+                return "simple_support"
+            return "simple_clarification"
+        # Complex path -> agent nodes
+        if intent in {Intent.FAQ_BUSINESS_HOURS, Intent.FAQ_SERVICE_POLICY}:
+            return "complex_faq"
+        if intent is Intent.APPOINTMENT_AVAILABILITY:
+            return "complex_availability"
+        if intent in _SUPPORT_INTENTS:
+            return "complex_support"
+        return "simple_clarification"
         classification = state["classification"]
         if classification.status is not ClassificationStatus.CLASSIFIED:
             return "clarification"
@@ -302,7 +571,23 @@ class ConversationWorkflow:
     ) -> dict[str, tuple[CapabilityResult, ...]]:
         classification = state["classification"]
         intent = classification.intents[0]
-        answer = self.knowledge.answer(state["request"].message_text)
+        text = state["request"].message_text
+        if self._rag_enabled:
+            if self._rag_provider == "semantic" and self._semantic_retriever is not None:
+                try:
+                    answer = self._semantic_retriever.answer(text)
+                except Exception:
+                    # Semantic provider failed; fall back to lexical retriever.
+                    if self._lexical_retriever is not None:
+                        answer = self._lexical_retriever.answer(text)
+                    else:
+                        answer = self.knowledge.answer(text)
+            elif self._lexical_retriever is not None:
+                answer = self._lexical_retriever.answer(text)
+            else:
+                answer = self.knowledge.answer(text)
+        else:
+            answer = self.knowledge.answer(text)
         return {
             "capability_results": (
                 _knowledge_result(intent, answer),
@@ -354,6 +639,112 @@ class ConversationWorkflow:
             )
         }
 
+    # A10/A11: Specialized agent capabilities - route complex requests through agents
+    async def _agent_faq_capability(
+        self,
+        state: ConversationState,
+    ) -> dict[str, tuple[CapabilityResult, ...]]:
+        classification = state["classification"]
+        text = state["request"].message_text
+        handler = self._agent_registry.get(Intent.FAQ_BUSINESS_HOURS)
+        if handler is None:
+            # Fall back to deterministic FAQ capability
+            return self._faq_capability(state)
+        result = await handler.handle(state["request"])
+        return {
+            "capability_results": (
+                CapabilityResult(
+                    intent=classification.intents[0],
+                    text=result["text"],
+                    source_ids=result.get("source_ids", ()),
+                    outcome=result.get("outcome", "answered"),
+                    retrieval_reason=tuple(
+                        result.get("retrieval_reason", "")
+                    )
+                    if result.get("retrieval_reason")
+                    else (),
+                ),
+            )
+        }
+
+    def _agent_availability_capability(
+        self,
+        state: ConversationState,
+    ) -> dict[str, tuple[CapabilityResult, ...]]:
+        classification = state["classification"]
+        handler = self._agent_registry.get(Intent.APPOINTMENT_AVAILABILITY)
+        if handler is None:
+            return self._availability_capability(state)
+        result = handler.handle(
+            state["request"],
+            db=state["db"],
+            session_id=state["session_id"],
+        )
+        # Map availability response status to a valid CapabilityResult outcome.
+        raw_outcome = result.get("outcome", "answered")
+        valid_outcomes = {"answered", "clarification", "handoff_unavailable", "unsupported"}
+        if raw_outcome in valid_outcomes:
+            outcome: Literal["answered", "clarification", "handoff_unavailable", "unsupported"] = raw_outcome
+        elif raw_outcome in {
+            AvailabilityStatus.AVAILABLE.value,
+            AvailabilityStatus.NO_RECORDED_SLOTS.value,
+        }:
+            outcome = "answered"
+        elif raw_outcome in {
+            AvailabilityStatus.NEEDS_CONTEXT.value,
+            AvailabilityStatus.AMBIGUOUS.value,
+            AvailabilityStatus.INVALID_DATE.value,
+        }:
+            outcome = "clarification"
+        else:
+            outcome = "unsupported"
+        return {
+            "capability_results": (
+                CapabilityResult(
+                    intent=classification.intents[0],
+                    text=result["text"],
+                    source_ids=result.get("source_ids", ()),
+                    outcome=outcome,
+                    retrieval_reason=tuple(
+                        result.get("retrieval_reason", "")
+                    )
+                    if result.get("retrieval_reason")
+                    else (),
+                ),
+            )
+        }
+
+    def _agent_support_capability(
+        self,
+        state: ConversationState,
+    ) -> dict[str, tuple[CapabilityResult, ...]]:
+        classification = state["classification"]
+        handler = self._agent_registry.get(Intent.HUMAN_REQUEST)
+        if handler is None:
+            return self._support_capability(state)
+        result = handler.handle(
+            state["request"],
+            db=state["db"],
+            session_id=state["session_id"],
+            trace_id=state["request"].trace_id,
+            intent=classification.intents[0],
+        )
+        return {
+            "capability_results": (
+                CapabilityResult(
+                    intent=classification.intents[0],
+                    text=result["text"],
+                    source_ids=result.get("source_ids", ()),
+                    outcome=result.get("outcome", "handoff_unavailable"),
+                    retrieval_reason=tuple(
+                        result.get("retrieval_reason", "")
+                    )
+                    if result.get("retrieval_reason")
+                    else (),
+                ),
+            )
+        }
+
     def _multi_intent_capability(
         self,
         state: ConversationState,
@@ -378,20 +769,36 @@ class ConversationWorkflow:
                     if has_hours_and_compound_intent
                     else text
                 )
+                answer = self.knowledge.answer(query)
+                if len(classification.intents) > 1:
+                    answer = KnowledgeAnswer(
+                        text=_trim_multi_intent_faq_response(answer.text),
+                        status=answer.status,
+                        reason=answer.reason,
+                        source_ids=answer.source_ids,
+                    )
                 results.append(
-                    _knowledge_result(intent, self.knowledge.answer(query))
+                    _knowledge_result(intent, answer)
                 )
             elif intent is Intent.FAQ_SERVICE_POLICY:
+                answer = self.knowledge.answer(
+                    _service_query(
+                        classification.entities.service_id,
+                        self.knowledge,
+                        text,
+                    )
+                )
+                if len(classification.intents) > 1:
+                    answer = KnowledgeAnswer(
+                        text=_trim_multi_intent_faq_response(answer.text),
+                        status=answer.status,
+                        reason=answer.reason,
+                        source_ids=answer.source_ids,
+                    )
                 results.append(
                     _knowledge_result(
                         intent,
-                        self.knowledge.answer(
-                            _service_query(
-                                classification.entities.service_id,
-                                self.knowledge,
-                                text,
-                            )
-                        ),
+                        answer,
                     )
                 )
             elif intent in {
@@ -507,6 +914,14 @@ class ConversationWorkflow:
                     )
                 ),
                 outcome=outcome,
+                retrieval_reason=tuple(
+                    dict.fromkeys(
+                        result.retrieval_reason[0]
+                        for result in results
+                        if result.retrieval_reason
+                    )
+                )
+                or (),
             )
         }
 
@@ -533,6 +948,7 @@ def _knowledge_result(
             if answer.status is AnswerStatus.ANSWERED
             else "unsupported"
         ),
+        retrieval_reason=(answer.reason,) if answer.reason else (),
     )
 
 
@@ -601,6 +1017,70 @@ def _handoff_confirmation_decision(text: str) -> str | None:
 
 def _is_short_acknowledgment(text: str) -> bool:
     return _handoff_confirmation_decision(text) in {"confirm", "reject"}
+
+
+def _conversational_response(text: str) -> str | None:
+    """Return a conversational response for small-talk / status queries, or
+    None if the message is not purely conversational (e.g. it contains business
+    keywords and should be routed through the normal capability graph).
+
+    These responses are deterministic and require no LLM or knowledge lookup.
+    """
+    import re
+
+    normalized = text.casefold().strip()
+    tokens = set(re.findall(r"[a-z0-9]+", normalized))
+
+    # If any business keyword is present, this is not purely conversational.
+    if tokens & _BUSINESS_MARKERS:
+        return None
+
+    words = normalized.split()
+
+    # Multi-word phrase matches (checked first so longer phrases win).
+    for phrase in _THANKS_PHRASES:
+        if phrase in normalized:
+            phrase_words = set(phrase.split())
+            if phrase_words.issubset(tokens) and len(words) <= len(phrase_words) + 2:
+                return "You're welcome!"
+    for phrase in _GREETING_PHRASES:
+        if phrase in normalized:
+            phrase_words = set(phrase.split())
+            if phrase_words.issubset(tokens) and len(words) <= len(phrase_words) + 2:
+                if phrase in ("goodbye", "good bye", "bye"):
+                    return "Goodbye! Have a great day."
+                return "Hello! How can I help you today?"
+    for phrase in _IDENTITY_PHRASES:
+        if phrase in normalized:
+            phrase_words = set(phrase.split())
+            if phrase_words.issubset(tokens) and len(words) <= len(phrase_words) + 2:
+                return "I'm TECHOHUB's automated assistant."
+    for phrase in _LISTENING_PHRASES:
+        if phrase in normalized:
+            phrase_words = set(phrase.split())
+            if phrase_words.issubset(tokens) and len(words) <= len(phrase_words) + 2:
+                return "Yes, I'm here. How can I help you?"
+    for phrase in _SECRET_PHRASES:
+        if phrase in normalized:
+            phrase_words = set(phrase.split())
+            if phrase_words.issubset(tokens) and len(words) <= len(phrase_words) + 2:
+                return "I can't share private API keys or credentials."
+
+    # Single-word matches (only for short messages).
+    if len(tokens) <= 3:
+        for word in tokens:
+            if word in _GREETING_WORDS:
+                return "Hello! How can I help you today?"
+            if word in _THANKS_WORDS:
+                return "You're welcome!"
+            if word in _ACKNOWLEDGEMENT_WORDS:
+                return "Sure."
+
+    # Secret keywords as single words.
+    if tokens & _SECRET_WORDS:
+        return "I can't share private API keys or credentials."
+
+    return None
 
 
 def _support_result(
@@ -686,6 +1166,41 @@ def _hours_query(requested_date: str | None) -> str:
     except ValueError:
         day = requested_date
     return f"What are the opening hours on {day}?"
+
+
+def _trim_multi_intent_faq_response(text: str) -> str:
+    """Trim a FAQ response to only the essential fact for multi-intent responses.
+
+    Preserves source IDs and retrieval reasons (handled separately on the
+    CapabilityResult) while removing unrelated detail (e.g. duration when only
+    price was asked) and demo-salon provenance prefixes.
+
+    For service answers like "A haircut costs $35 and takes about 30 minutes.",
+    splits at " and " to keep only the core fact.  For hours answers like
+    "Demo Salon is closed on Sunday.", replaces the demo-salon prefix with
+    "We're" for a more natural tone.
+    """
+    import re
+
+    # For service answers like "A haircut costs $35 and takes about 30 minutes.",
+    # split at " and " only when the text contains a price (to avoid splitting
+    # hours responses like "Monday through Friday from 09:00 to 18:00, and on
+    # Saturday from 10:00 to 16:00 Etc/UTC").
+    if " and " in text and re.search(r"\$[\d,.]", text):
+        first_part = text.split(" and ", 1)[0]
+        if not first_part.endswith("."):
+            first_part = first_part + "."
+        return first_part
+    # Otherwise, take the first sentence.
+    first_sentence = text.split(". ")[0]
+    if not first_sentence.endswith("."):
+        first_sentence = first_sentence + "."
+    # Remove "Demo Salon is/are " prefix and replace with "We're ".
+    if first_sentence.startswith("Demo Salon is "):
+        first_sentence = "We're " + first_sentence[len("Demo Salon is "):]
+    elif first_sentence.startswith("Demo Salon are "):
+        first_sentence = "We're " + first_sentence[len("Demo Salon are "):]
+    return first_sentence
 
 
 def _service_query(

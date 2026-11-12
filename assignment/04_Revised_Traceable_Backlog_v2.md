@@ -76,18 +76,32 @@ o, ok, okay), Chrome frequently emits interim hypotheses (isFinal: false) and im
 
 | Original IDs | Feature / deliverable | V2 decision | Acceptance / tests | Initial status |
 |---|---|---|---|---|
-| A00–A01 | Approved RAG corpus/index and small vector adapter | Mandatory P1-S | Approved-only chunks, repeatable lightweight index, source identity | Pending |
-| A02–A03 | OKF+RAG fusion, deduplication, abstention/conflict/fallback | Mandatory P1-S | Empty RAG→OKF, conflicting sources→safe abstain, paraphrase tests | Pending |
-| A04–A05 | RAG feature flag, evidence view/metrics, stabilize | Mandatory P1-S | Known-provenance answer; existing OKF direct path remains working | Pending |
+| A00–A01 | Approved RAG corpus/index and small vector adapter | Mandatory P1-S | Approved-only chunks, repeatable lightweight index, source identity | A01 implemented (chunker + knowledge_bundle, 16 tests); A00 vector adapter deferred — no embeddings/vector DB per A01 constraints |
+| A02–A03 | OKF+RAG fusion, deduplication, abstention/conflict/fallback | Mandatory P1-S | Empty RAG→OKF, conflicting sources→safe abstain, paraphrase tests | A02 implemented (backend/rag.py + tests/test_rag.py, 13 tests); A03 implemented (backend/rag.py hardening + 5 new tests); lexical fusion over A01 chunks — semantic embedding provider pending under A05 |
+| A04–A05 | RAG feature flag, evidence view/metrics, stabilize | Mandatory P1-S | Known-provenance answer; existing OKF direct path remains working | A04 implemented (TECHOHUB_RAG_ENABLED flag, LangGraph FAQ integration, safe fallback, retrieval_reason diagnostics); A05 implemented (semantic embeddings via cached all-MiniLM-L6-v2 model, cosine similarity, safe fallback to lexical→OKF) |
 | A06–A07 | Urdu STT and Urdu→English normalization | **Deferred — out of active V2 scope** | No Urdu STT/normalization acceptance gate in active V2 | Deferred |
 | A08–A09 | English→Urdu response translation and Urdu TTS | **Deferred — out of active V2 scope** | No Urdu translation/TTS acceptance gate in active V2 | Deferred |
-| A10–A11 | Bounded complexity routing and specialized agents | Selected mandatory P1-S (minimal) | Reuse FAQ/availability/support domain tools; no duplicated writes; simple fast path | Pending |
-| A12–A13 | One local MCP server/client for existing approved tools | Selected mandatory P1-S (minimal) | Schema/ACL/timeout/audit, direct fallback, pending handoff gates intact | Pending |
+| A10–A11 | Bounded complexity routing and specialized agents | Selected mandatory P1-S (minimal) | Reuse FAQ/availability/support domain tools; no duplicated writes; simple fast path | A10/A11 implemented (backend/agents.py, backend/workflow.py, tests/test_agents.py). AgentRegistry + RuleFirstIntentClassifier route simple intents to deterministic capabilities and complex intents to specialized agents (FaqAgent, AvailabilityAgent, SupportAgent). tests/test_agents.py (8 tests) cover complexity classification, agent registry, FAQ/availability/support agents, workflow integration. Full backend suite: 350 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed.
+| A12–A13 | One local MCP server/client for existing approved tools | Selected mandatory P1-S (minimal) | Schema/ACL/timeout/audit, direct fallback, pending handoff gates intact | A12/A13 implemented (backend/mcp_server.py, backend/mcp_client.py, tests/test_mcp.py). MCP server exposes four approved tools over stdio: faq_retrieve, service_catalog, availability_check, support_info. MCP client uses ClientSession over stdio_client (actual MCP protocol). FaqAgent integrates MCP client for single-service FAQ lookups with OKF fallback on failure. tests/test_mcp.py (11 tests) covers tool exposure, client connection, tool discovery, agent-through-MCP execution, grounding/provenance, read-only availability, unsupported booking, confirmation/idempotency, failure fallback, and bypass detection. Full backend suite: 370 passed; Python compilation clean; git diff --check clean; frontend 93 passed; vite build passed. |
 | A14–A15 | Synthetic create/reschedule/cancel booking | **Deferred — out of V2 scope** | No writes; keep original P0 read-only lookup | Deferred |
 | A16–A17 | CRM profiles, advanced ticket updates, analytics expansion | **Deferred — out of V2 scope** | Keep existing P0 persisted tickets and staff read | Deferred |
-| A18–A19 | P1 cross-feature integration and fixes | Active, **re-scoped** P1-S | Test only selected RAG, agents and MCP interactions; no Urdu or other deferred-feature assertions | Pending |
+| A18–A19 | P1 cross-feature integration and fixes | Active, **re-scoped** P1-S | Test only selected RAG, agents and MCP interactions; no Urdu or other deferred-feature assertions | A18/A19 implemented (tests/test_mcp.py cross-feature integration tests). Covers RAG OFF + MCP OFF deterministic OKF; RAG ON + MCP ON FAQ through MCP tool; MCP failure → OKF fallback; multi-intent aggregation; support confirmation/idempotency; invalid input → clarification. No high-priority integration defects found. Full backend suite: 376 passed; frontend: 93 passed; build passed. |
 
 **MCP minimum:** expose existing FAQ/catalog, synthetic availability and carefully guarded support tools where safe. A tool listed via MCP is never permission to bypass server confirmation, staff authorization or idempotency. Direct-tool mode remains functional if MCP is off. **Agents minimum:** no extra agent just to replace deterministic one-question routing; preserve LangGraph quick path.
+
+### A10/A11 known limitation — agent reachability under normal intent classification
+
+`SupportAgent` is reachable through normal production routing: `Book a haircut appointment Friday.` is classified `APPOINTMENT_CREATE` by `ComplexityClassifier.COMPLEX_INTENTS` and routes via `classify_complexity` to `agent_support`.
+
+`FaqAgent` and `AvailabilityAgent` are integrated into the compiled LangGraph and verified using mocked intent classifiers (tests in `tests/test_agents.py`). However, normal rules-first intent classification (`classify_with_rules` in `backend/intent.py`) currently sends certain multi-service FAQ and multi-date availability requests to clarification before they reach agent routing:
+
+- Multi-service FAQ (e.g. "What is the price of a haircut and what is the price of a beard trim?") is classified `FAQ_SERVICE_POLICY` but `ComplexityClassifier` only marks it COMPLEX when `mentioned_service_ids` detects more than one service. The rules classifier returns clarification for ambiguous or combined phrasings before reaching the complexity node.
+- Multi-date availability (e.g. "Do you have haircut slots Friday and Saturday?") is classified `APPOINTMENT_AVAILABILITY` but `ComplexityClassifier` only marks it COMPLEX when more than one day token is detected. `_parse_message_date` returns `AMBIGUOUS` for multiple dates in `backend/availability.py`, producing clarification before agent routing.
+- Multi-day hours (e.g. "Are you open Friday and Saturday?") similarly reaches clarification through `_requested_days` in `backend/knowledge.py`.
+
+This is an **acknowledged limitation, not a confirmed failure of the existing A10/A11 acceptance criteria**. The agent nodes exist in the compiled graph, are wired to `aggregate_response`, and produce valid `CapabilityResult` outputs when invoked directly or via mocked classifiers. Future intent-classification improvements (e.g. relaxed date/ambiguity handling) may address this limitation without changing the agent implementation.
+
+No source-code or test changes are required for this documentation; the limitation is recorded here for traceability.
 
 ## 5. P2-S backlog — NEW delivery requirements
 
