@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "backend/main.py": {
+      "excludeFiles": "{tests/**,frontend/**,assignment/**,docs/**,data/**,.git/**,.venv/**,**/.venv/**,**/venv/**,**/__pycache__/**,**/*.pyc,node_modules/**,.env*,**/.env*,requirements.in,requirements.lock.txt,requirements.render.txt,render.yaml,README.md,DEPLOYMENT_REPORT.md,svc_err.txt,svc_out.txt}"
+    }
+  }
+}

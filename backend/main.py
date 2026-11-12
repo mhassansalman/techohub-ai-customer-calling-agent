@@ -12,6 +12,7 @@ from uuid import UUID
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
+from sqlalchemy.exc import ArgumentError
 from sqlalchemy.orm import Session
 
 from backend.availability import AvailabilityConversationService
@@ -22,6 +23,7 @@ from backend.database import (
     create_database_engine,
     create_session_factory,
     database_session_dependency,
+    is_postgresql_url,
 )
 from backend.fixtures import load_demo_salon_fixture
 from backend.intent import (
@@ -83,7 +85,10 @@ def _cors_allow_origins() -> list[str]:
     raw = os.getenv("TECHOHUB_CORS_ORIGINS", "").strip()
     if not raw:
         return []
-    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    if "*" in origins:
+        raise ValueError("TECHOHUB_CORS_ORIGINS must not contain a wildcard.")
+    return origins
 
 
 def require_session_access_token(
@@ -170,7 +175,25 @@ def create_app(
     workflow: ConversationWorkflow | None = None,
     classifier: IntentClassifier | None = None,
 ) -> FastAPI:
-    engine = create_database_engine(database_url)
+    is_vercel = bool(os.getenv("VERCEL"))
+    resolved_database_url = database_url or os.getenv("DATABASE_URL") or None
+    if is_vercel:
+        if not resolved_database_url:
+            raise RuntimeError(
+                "DATABASE_URL is required on Vercel. Set it to the Neon "
+                "PostgreSQL connection string in the project environment variables."
+            )
+        try:
+            is_postgresql = is_postgresql_url(resolved_database_url)
+        except ArgumentError:
+            is_postgresql = False
+        if not is_postgresql:
+            raise RuntimeError(
+                "DATABASE_URL must be a valid PostgreSQL connection string on Vercel."
+            ) from None
+    allowed_origins = _cors_allow_origins()
+    mcp_enabled = McpConfig.from_environment().enabled and not is_vercel
+    engine = create_database_engine(resolved_database_url)
     session_factory = create_session_factory(engine)
 
     @asynccontextmanager
@@ -189,7 +212,11 @@ def create_app(
         rag_config = RagConfig.from_environment()
         lexical_retriever = RagRetriever() if rag_config.enabled else None
         semantic_retriever = None
-        if rag_config.enabled and rag_config.provider in {"semantic", "auto"}:
+        if (
+            not is_vercel
+            and rag_config.enabled
+            and rag_config.provider in {"semantic", "auto"}
+        ):
             try:
                 semantic_retriever = SemanticRetriever(
                     index=load_approved_chunks(),
@@ -199,7 +226,8 @@ def create_app(
                 # Semantic provider unavailable; fall back to lexical only.
                 semantic_retriever = None
         if (
-            rag_config.enabled
+            not is_vercel
+            and rag_config.enabled
             and rag_config.provider == "semantic"
             and semantic_retriever is None
         ):
@@ -222,11 +250,14 @@ def create_app(
         lexical_retriever=lexical_retriever,
         semantic_retriever=semantic_retriever,
         rag_enabled=rag_config.enabled if rag_config else False,
-        rag_provider=rag_config.provider if rag_config else "lexical",
-        mcp_enabled=McpConfig.from_environment().enabled,
+        rag_provider=(
+            "lexical"
+            if is_vercel and rag_config and rag_config.provider in {"semantic", "auto"}
+            else rag_config.provider if rag_config else "lexical"
+        ),
+        mcp_enabled=mcp_enabled,
     )
 
-    allowed_origins = _cors_allow_origins()
     if allowed_origins:
         app.add_middleware(
             CORSMiddleware,

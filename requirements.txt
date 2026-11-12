@@ -1,0 +1,19 @@
+# TECHOHUB backend runtime dependencies for Vercel Hobby (Python/FastAPI).
+#
+# Production runtime set only: excludes pytest/dev tooling and the heavyweight
+# ML stack (torch, sentence-transformers, transformers, scikit-learn, scipy)
+# that is only needed for optional local semantic RAG. Semantic RAG and MCP
+# remain disabled on the public Vercel deployment.
+#
+# psycopg[binary] is the PostgreSQL driver used to connect to Neon via
+# DATABASE_URL. SQLite remains the default for local development.
+
+fastapi==0.144.0
+sqlalchemy==2.1.6
+psycopg[binary]==3.3.9
+pydantic==2.13.4
+httpx==0.28.1
+groq==1.7.0
+langgraph==1.2.15
+mcp==2.3.0
+PyYAML==6.0.3
