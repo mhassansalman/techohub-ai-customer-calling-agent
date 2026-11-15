@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, time, timedelta
+import os
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
@@ -169,10 +170,18 @@ def load_demo_salon_fixture(
     path: Path | None = None,
 ) -> SalonFixtureBundle:
     """Load the approved canonical fixture; never substitute test-only data."""
-    return load_fixture(
+    fixture = load_fixture(
         path or CANONICAL_FIXTURE_PATH,
         expected_kind=FixtureKind.CANONICAL,
     )
+    mode = os.getenv("TECHOHUB_CLOCK_MODE", "fixture").strip().lower()
+    if mode == "system":
+        # Only the interpretation clock changes. Recorded slot dates and all
+        # approved business facts remain exactly as supplied in the fixture.
+        return fixture.model_copy(update={"pinned_clock": datetime.now(UTC)})
+    if mode != "fixture":
+        raise ValueError("TECHOHUB_CLOCK_MODE must be system or fixture.")
+    return fixture
 
 
 def demo_clock(fixture: SalonFixtureBundle) -> datetime:

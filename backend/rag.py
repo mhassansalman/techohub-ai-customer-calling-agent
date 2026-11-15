@@ -504,7 +504,7 @@ class SentenceTransformerProvider:
         if self._model is None:
             from sentence_transformers import SentenceTransformer
 
-            self._model = SentenceTransformer(self._model_name)
+            self._model = SentenceTransformer(self._model_name, local_files_only=True)
         return self._model
 
     def embed(self, texts: list[str]) -> list[list[float]]:

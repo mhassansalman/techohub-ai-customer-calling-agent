@@ -16,8 +16,10 @@ from contextlib import asynccontextmanager
 from contextlib import AsyncExitStack
 from typing import Any
 
+from anyio import EndOfStream
 from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.shared.exceptions import MCPError
 
 _MCP_ENABLED_KEY = "TECHOHUB_MCP_ENABLED"
 _TRUE_VALUES = frozenset({"true", "1", "yes", "on"})
@@ -82,14 +84,18 @@ class McpClient:
             args=MCP_SERVER_ARGS,
         )
         self._exit_stack = AsyncExitStack()
-        read_stream, write_stream = await self._exit_stack.enter_async_context(
-            stdio_client(params)
-        )
-        self._session = await self._exit_stack.enter_async_context(
-            ClientSession(read_stream, write_stream)
-        )
-        await self._session.initialize()
-        self._connected = True
+        try:
+            read_stream, write_stream = await self._exit_stack.enter_async_context(
+                stdio_client(params)
+            )
+            self._session = await self._exit_stack.enter_async_context(
+                ClientSession(read_stream, write_stream)
+            )
+            await self._session.initialize()
+            self._connected = True
+        except (EndOfStream, EOFError, MCPError, OSError, TimeoutError) as error:
+            await self.close()
+            raise McpConnectionError("MCP server connection failed") from error
 
     async def close(self) -> None:
         """Close the MCP session and tear down the subprocess."""

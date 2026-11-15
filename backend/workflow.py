@@ -32,6 +32,7 @@ from backend.intent import (
     IntentClassification,
     IntentClassifier,
     ProviderErrorCode,
+    classify_with_rules,
 )
 from backend.knowledge import AnswerStatus, KnowledgeAnswer, KnowledgeService
 from backend.rag import RagConfig, RagRetriever, SemanticRetriever
@@ -42,7 +43,8 @@ from backend.models import (
     PendingAvailabilityDateContext,
 )
 from backend.session_service import create_handoff_ticket
-from backend.mcp_client import McpClient, McpConfig
+from backend.service_phrases import mentioned_service_ids
+from backend.mcp_client import McpClient, McpConfig, McpConnectionError
 
 
 HANDOFF_CONFIRMATION_PROMPT = (
@@ -76,7 +78,7 @@ _GREETING_PHRASES = frozenset(
 _GREETING_WORDS = frozenset({"hello", "hi", "hey", "howdy", "hiya"})
 
 _THANKS_PHRASES = frozenset(
-    {"thank you", "thank you very much", "thanks a lot", "thankyou"}
+    {"thank you", "thank you very much", "thanks a lot", "thankyou", "thank u"}
 )
 _THANKS_WORDS = frozenset({"thanks", "thx", "ty"})
 
@@ -259,12 +261,10 @@ class ConversationWorkflow:
         request: CustomerRequest,
         db: Session,
     ) -> ConversationWorkflowResult:
-        # Connect MCP client when enabled; ensure teardown on completion.
-        if self._mcp_enabled and self._mcp_client is not None:
-            await self._mcp_client.connect()
         try:
             if self._mcp_enabled and self._mcp_client is not None:
                 try:
+                    await self._mcp_client.connect()
                     return await self._run_with_mcp(
                         session_id=session_id, request=request, db=db
                     )
@@ -350,6 +350,7 @@ class ConversationWorkflow:
                     outcome="answered",
                 )
 
+            request = self._resolve_service_follow_up(db, session_id, request)
             context = db.get(AvailabilityConversationContext, str(session_id))
             pending_date = db.get(
                 PendingAvailabilityDateContext,
@@ -370,6 +371,37 @@ class ConversationWorkflow:
         except Exception as error:
             raise WorkflowExecutionError("conversation workflow failed") from error
         return ConversationWorkflowResult.model_validate(state["response"])
+
+    def _resolve_service_follow_up(
+        self, db: Session, session_id: UUID, request: CustomerRequest
+    ) -> CustomerRequest:
+        """Resolve narrow price/duration references from this session's last topic."""
+        normalized = " ".join(re.findall(r"[a-z0-9]+", request.message_text.casefold()))
+        if not re.fullmatch(
+            r"(?:how long does (?:it|that) take|how much (?:is|does) (?:it|that)(?: cost)?|"
+            r"what is (?:its|the) (?:price|duration))", normalized
+        ):
+            return request
+        history = list(db.scalars(
+            select(Message).where(
+                Message.session_id == str(session_id),
+                Message.role == MessageRole.CUSTOMER.value,
+            ).order_by(Message.sequence.desc()).limit(8)
+        ))
+        if history and history[0].text == request.message_text:
+            history = history[1:]
+        for message in history:
+            if _conversational_response(message.text) is not None or _is_short_acknowledgment(message.text):
+                continue
+            ids = mentioned_service_ids(message.text, self.knowledge.fixture.services)
+            if len(ids) == 1:
+                service = next(s for s in self.knowledge.fixture.services if s.service_id == ids[0])
+                return request.model_copy(update={
+                    "message_text": f"{request.message_text} ({service.name})"
+                })
+            # A different or ambiguous topic must not reuse an older service.
+            break
+        return request
 
     async def _run_with_mcp(
         self,
@@ -422,6 +454,15 @@ class ConversationWorkflow:
             ):
                 return None
             if HANDOFF_CONFIRMATION_PROMPT in assistant_message.text:
+                if (
+                    decision is None
+                    and classify_with_rules(request.message_text).status
+                    is ClassificationStatus.CLASSIFIED
+                ):
+                    # A clear new request leaves confirmation. Its persisted
+                    # response replaces the prompt, so a later yes cannot
+                    # confirm the abandoned operation, including after restart.
+                    return None
                 return decision, originating_message.id
             index -= 2
         return None
@@ -516,8 +557,7 @@ class ConversationWorkflow:
         )
         return {"complexity_assessment": assessment}
 
-    @staticmethod
-    def _route_complexity(state: ConversationState) -> str:
+    def _route_complexity(self, state: ConversationState) -> str:
         assessment = state.get("complexity_assessment")
         if assessment is None:
             return "simple_clarification"
@@ -529,6 +569,18 @@ class ConversationWorkflow:
             return "simple_multi"
         intent = intents[0]
         if assessment.complexity == Complexity.SIMPLE:
+            if (
+                self._mcp_enabled
+                and intent is Intent.FAQ_SERVICE_POLICY
+                and len(
+                    mentioned_service_ids(
+                        state["request"].message_text,
+                        self.knowledge.fixture.services,
+                    )
+                )
+                == 1
+            ):
+                return "complex_faq"
             if intent in {Intent.FAQ_BUSINESS_HOURS, Intent.FAQ_SERVICE_POLICY}:
                 return "simple_faq"
             if intent is Intent.APPOINTMENT_AVAILABILITY:
@@ -587,6 +639,9 @@ class ConversationWorkflow:
             else:
                 answer = self.knowledge.answer(text)
         else:
+            answer = self.knowledge.answer(text)
+        if intent is Intent.FAQ_BUSINESS_HOURS and classification.entities.requested_date:
+            # Generic RAG paragraphs cannot answer a specific day reliably.
             answer = self.knowledge.answer(text)
         return {
             "capability_results": (
@@ -781,26 +836,18 @@ class ConversationWorkflow:
                     _knowledge_result(intent, answer)
                 )
             elif intent is Intent.FAQ_SERVICE_POLICY:
-                answer = self.knowledge.answer(
-                    _service_query(
-                        classification.entities.service_id,
-                        self.knowledge,
-                        text,
+                service_ids = mentioned_service_ids(text, self.knowledge.fixture.services)
+                for service_id in service_ids or (classification.entities.service_id,):
+                    answer = self.knowledge.answer(
+                        _service_query(service_id, self.knowledge, text)
                     )
-                )
-                if len(classification.intents) > 1:
-                    answer = KnowledgeAnswer(
-                        text=_trim_multi_intent_faq_response(answer.text),
-                        status=answer.status,
-                        reason=answer.reason,
-                        source_ids=answer.source_ids,
+                    if len(classification.intents) > 1:
+                        answer = answer.model_copy(update={
+                            "text": _trim_multi_intent_faq_response(answer.text),
+                        })
+                    results.append(
+                        _knowledge_result(intent, answer)
                     )
-                results.append(
-                    _knowledge_result(
-                        intent,
-                        answer,
-                    )
-                )
             elif intent in {
                 Intent.APPOINTMENT_AVAILABILITY,
                 Intent.APPOINTMENT_DATE_CORRECTION,
@@ -982,6 +1029,19 @@ def _handoff_confirmation_decision(text: str) -> str | None:
         return "confirm"
     if normalized in negative_phrases:
         return "reject"
+    if re.fullmatch(
+        r"(?:(?:no|nope|nah) )?(?:please )?(?:do not|don't|dont) "
+        r"(?:create|queue|open) (?:(?:a|the|my) )?(?:support )?ticket(?: please)?"
+        r"|(?:please )?cancel (?:(?:a|the|my) )?(?:support )?ticket(?: please)?",
+        normalized,
+    ):
+        return "reject"
+    if re.fullmatch(
+        r"(?:(?:yes|yeah|yep|sure|okay|ok)(?: please)? )?(?:please )?"
+        r"(?:create|queue|open) (?:a|the|my) (?:support )?ticket(?: please)?",
+        normalized,
+    ):
+        return "confirm"
 
     affirmative_tokens = {
         "yes",
@@ -1043,6 +1103,8 @@ def _conversational_response(text: str) -> str | None:
             phrase_words = set(phrase.split())
             if phrase_words.issubset(tokens) and len(words) <= len(phrase_words) + 2:
                 return "You're welcome!"
+    if normalized.rstrip(".!?") in _ACKNOWLEDGEMENT_PHRASES:
+        return "Sure."
     for phrase in _GREETING_PHRASES:
         if phrase in normalized:
             phrase_words = set(phrase.split())
@@ -1186,8 +1248,8 @@ def _trim_multi_intent_faq_response(text: str) -> str:
     # split at " and " only when the text contains a price (to avoid splitting
     # hours responses like "Monday through Friday from 09:00 to 18:00, and on
     # Saturday from 10:00 to 16:00 Etc/UTC").
-    if " and " in text and re.search(r"\$[\d,.]", text):
-        first_part = text.split(" and ", 1)[0]
+    if re.search(r"\s+and\s+takes?\b", text) and re.search(r"\$[\d,.]", text):
+        first_part = re.split(r"\s+and\s+(?=takes?\b)", text, maxsplit=1)[0]
         if not first_part.endswith("."):
             first_part = first_part + "."
         return first_part

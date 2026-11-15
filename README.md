@@ -27,7 +27,7 @@ From PowerShell:
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements.lock.txt
+python -m pip install -r requirements.lock.txt -r requirements.txt
 ```
 
 In Git Bash:
@@ -36,17 +36,19 @@ In Git Bash:
 py -3.12 -m venv .venv
 source .venv/Scripts/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.lock.txt
+python -m pip install -r requirements.lock.txt -r requirements.txt
 ```
 
 If PowerShell activation is restricted, run the environment directly:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt -r requirements.txt
 ```
 
 `requirements.in` records the direct Week 1 Python dependencies;
-`requirements.lock.txt` pins the resolved environment. Frontend dependencies
+`requirements.lock.txt` pins the original resolved environment; install it
+together with `requirements.txt`, which supplies the newer MCP/PostgreSQL
+runtime dependencies. Frontend dependencies
 are pinned in `frontend/package.json` and `frontend/package-lock.json`. Install
 them from PowerShell with:
 
@@ -71,7 +73,7 @@ The FastAPI application currently exposes the session lifecycle API below.
 Start it from the repository root after installing the Python dependencies:
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload
+.\.venv\Scripts\python.exe -m backend.local --reload
 ```
 
 ### Session lifecycle API
@@ -90,7 +92,7 @@ Start it from the repository root after installing the Python dependencies:
 Run the backend from the repository root in one PowerShell terminal:
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m backend.local --reload
 ```
 
 In a second terminal, start the Vite development server:
@@ -107,6 +109,42 @@ The development server proxies `/api` requests to `127.0.0.1:8000`; no API
 key or provider credential is sent to the browser. Run the frontend tests and
 production build from the `frontend` directory with `npm.cmd test` and
 `npm.cmd run build`.
+
+The explicit local entry point selects `TECHOHUB_RUNTIME=local`, binds to
+`127.0.0.1:8000`, and uses the repository's `data/techohub.db` SQLite file.
+It ignores deployment `DATABASE_URL` and `VERCEL` values. To use a separate
+local SQLite file, set `$env:TECHOHUB_LOCAL_DATABASE_URL='sqlite:///./data/my-local.db'`
+before starting. PostgreSQL URLs are rejected in this local mode. The existing
+`backend.main:app` deployment entry point still supports PostgreSQL and Vercel.
+No database reset is required for the current schema.
+
+Relative days in the local entry point use the current UTC date, matching the
+salon's approved `Etc/UTC` timezone. Recorded fixture slots remain on
+2026-10-30 and 2026-10-31; a current-date lookup may correctly find no recorded
+slots. Nothing is moved forward and no real availability is claimed. For the
+repeatable October demonstration only, set `$env:TECHOHUB_CLOCK_MODE='fixture'`
+before startup. The generic application entry point retains that fixture clock
+by default for compatibility; `backend.local` defaults to `system`.
+
+Core local conversations need no provider credentials. Groq settings may be
+read from the ignored root `.env`; other backend options are process environment
+variables. Optional retrieval can be enabled with
+`$env:TECHOHUB_RAG_ENABLED='true'` and `$env:TECHOHUB_RAG_PROVIDER='lexical'`.
+Semantic retrieval requires the optional installed model and libraries; MCP
+can be enabled with `$env:TECHOHUB_MCP_ENABLED='true'`. Both are optional for
+local startup. See [the recovery report](LOCAL_RECOVERY_REPORT.md) for verified
+capabilities and limitations.
+
+Keep `VITE_API_BASE_URL` unset for local Vite development (it defaults to `/api`).
+For a separate hosted backend, its value must include the `/api` prefix, for
+example `https://example-backend.example/api`. The Vite proxy makes local
+browser requests same-origin, so local CORS permissions are unnecessary.
+
+Session creation returns an `access_token` separately from the public session
+ID. Send it in `X-Session-Token` for status, message, and end requests. Missing,
+incorrect, or another session's tokens return 401. The React client keeps the
+token in memory; refreshing the page starts a new conversation rather than
+restoring the previous transcript or exposing its token in browser storage.
 
 Session history can be read by the persistence layer for tests and trusted
 application code. A transcript-reading HTTP endpoint is intentionally absent

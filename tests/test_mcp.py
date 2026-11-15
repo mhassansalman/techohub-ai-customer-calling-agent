@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 
 from backend.agents import FaqAgent, SupportAgent
 from backend.channels import ChannelType, CustomerRequest, InputModality
@@ -45,6 +46,29 @@ def _make_customer_request(text: str) -> CustomerRequest:
         modality=InputModality.TEXT,
         message_text=text,
     )
+
+
+def _post_authenticated_message(client: TestClient, text: str):
+    session_response = client.post(
+        "/api/sessions",
+        json={"channel_type": ChannelType.TEXT_WEB.value},
+    )
+    assert session_response.status_code == 201
+    session = session_response.json()
+    session_id = session["session"]["session_id"]
+    response = client.post(
+        f"/api/sessions/{session_id}/messages",
+        headers={"X-Session-Token": session["access_token"]},
+        json={
+            "session_id": session_id,
+            "trace_id": str(uuid4()),
+            "timestamp": datetime.now(UTC).isoformat(),
+            "channel_type": ChannelType.TEXT_WEB.value,
+            "modality": InputModality.TEXT.value,
+            "message_text": text,
+        },
+    )
+    return response
 
 
 def _run_workflow(
@@ -275,15 +299,10 @@ async def test_mcp_bypass_integration_fails() -> None:
 
 @pytest.mark.asyncio
 async def test_workflow_mcp_faq_agent_through_compiled_graph(tmp_path: Path) -> None:
-    """Full compiled LangGraph execution with MCP-enabled FaqAgent.
-
-    Proves that the MCP client is integrated into the LangGraph agent
-    architecture and the agent executes a tool through MCP during a real
-    graph run.
-    """
+    """A single-service policy FAQ reaches the real MCP server through LangGraph."""
     app = create_app(
         f"sqlite:///{(tmp_path / 'mcp_workflow.sqlite3').as_posix()}",
-        classifier=_FaqClassifier(),
+        classifier=RuleFirstIntentClassifier(FakeGroq()),
     )
     Base.metadata.create_all(app.state.database_engine)
 
@@ -300,29 +319,197 @@ async def test_workflow_mcp_faq_agent_through_compiled_graph(tmp_path: Path) -> 
             db.commit()
 
             workflow = ConversationWorkflow(
-                classifier=_FaqClassifier(),
+                classifier=RuleFirstIntentClassifier(FakeGroq()),
                 knowledge=KnowledgeService(),
                 availability=AvailabilityConversationService(),
                 rag_retriever=RagRetriever(),
                 rag_enabled=False,
+                mcp_enabled=True,
             )
 
-            # Connect MCP client and inject into the workflow's FaqAgent
-            async with mcp_client_session() as mcp_client:
-                faq_agent = workflow._agent_registry.get(Intent.FAQ_BUSINESS_HOURS)
-                assert faq_agent is not None
-                faq_agent._mcp_client = mcp_client
-
-                result = await workflow.run(
-                    session_id=uuid4(),
-                    request=_make_customer_request("How much is a haircut?"),
-                    db=db,
-                )
+            session_id = UUID(session.id)
+            result = await workflow.run(
+                session_id=session_id,
+                request=CustomerRequest(
+                    session_id=session_id,
+                    trace_id=uuid4(),
+                    timestamp=datetime.now(UTC),
+                    channel_type=ChannelType.TEXT_WEB,
+                    modality=InputModality.TEXT,
+                    message_text="How much is a haircut?",
+                ),
+                db=db,
+            )
 
             assert result.outcome == "answered"
-            assert "$35" in result.response_text or "35.00" in result.response_text
+            assert result.response_text == "A haircut costs $35."
+            assert result.source_ids == (
+                "fixture:demo-salon-v1:service:haircut",
+            )
+            assert result.retrieval_reason == ("mcp_faq_retrieve",)
     finally:
         app.state.database_engine.dispose()
+
+
+def test_authenticated_single_service_faq_invokes_mcp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An authenticated FAQ request calls the real MCP tool and uses its result."""
+    monkeypatch.setenv("TECHOHUB_RUNTIME", "local")
+    monkeypatch.setenv("TECHOHUB_MCP_ENABLED", "true")
+    monkeypatch.setenv("TECHOHUB_RAG_ENABLED", "false")
+    tool_calls = []
+    agent_results = []
+    graph_routes = []
+
+    original_call_tool = McpClient.call_tool
+
+    async def observe_call_tool(self, name: str, arguments: dict):
+        result = await original_call_tool(self, name, arguments)
+        tool_calls.append((name, arguments, result))
+        return result
+
+    original_agent_handle = FaqAgent.handle
+
+    async def observe_agent_handle(self, request: CustomerRequest):
+        result = await original_agent_handle(self, request)
+        agent_results.append(result)
+        return result
+
+    original_agent_node = ConversationWorkflow._agent_faq_capability
+
+    async def observe_agent_node(self, state):
+        graph_routes.append("agent_faq")
+        return await original_agent_node(self, state)
+
+    monkeypatch.setattr(McpClient, "call_tool", observe_call_tool)
+    monkeypatch.setattr(FaqAgent, "handle", observe_agent_handle)
+    monkeypatch.setattr(
+        ConversationWorkflow, "_agent_faq_capability", observe_agent_node
+    )
+    app = create_app(
+        f"sqlite:///{(tmp_path / 'authenticated_mcp.sqlite3').as_posix()}"
+    )
+    assert app.state.conversation_workflow._mcp_enabled
+
+    with TestClient(app) as client:
+        response = _post_authenticated_message(
+            client, "What is the price and duration of a haircut?"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["assistant_message"]["text"] == (
+        "A haircut costs $35 and takes about 30 minutes."
+    )
+    assert graph_routes == ["agent_faq"]
+    assert len(tool_calls) == 1
+    tool_name, arguments, tool_result = tool_calls[0]
+    assert tool_name == "faq_retrieve"
+    assert arguments == {
+        "query": "What is the price and duration of a haircut?"
+    }
+    assert not tool_result["is_error"]
+    assert tool_result["structured"] == {
+        "text": "A haircut costs $35 and takes about 30 minutes.",
+        "status": "answered",
+        "reason": "service_catalog",
+        "source_ids": ["fixture:demo-salon-v1:service:haircut"],
+    }
+    assert agent_results[0]["text"] == (
+        "A haircut costs $35 and takes about 30 minutes."
+    )
+    assert agent_results[0]["source_ids"] == (
+        "fixture:demo-salon-v1:service:haircut",
+    )
+    assert agent_results[0]["retrieval_reason"] == ("mcp_faq_retrieve",)
+
+
+def test_authenticated_single_service_faq_keeps_mcp_disabled_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TECHOHUB_RUNTIME", "local")
+    monkeypatch.setenv("TECHOHUB_MCP_ENABLED", "false")
+    app = create_app(
+        f"sqlite:///{(tmp_path / 'mcp_disabled.sqlite3').as_posix()}"
+    )
+
+    with TestClient(app) as client:
+        response = _post_authenticated_message(
+            client, "What is the price and duration of a haircut?"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["assistant_message"]["text"] == (
+        "A haircut costs $35 and takes about 30 minutes."
+    )
+    assert app.state.conversation_workflow._mcp_client is None
+
+
+def test_enabled_mcp_preserves_business_hours_and_multi_service_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TECHOHUB_RUNTIME", "local")
+    monkeypatch.setenv("TECHOHUB_MCP_ENABLED", "true")
+    app = create_app(
+        f"sqlite:///{(tmp_path / 'mcp_other_faq_paths.sqlite3').as_posix()}"
+    )
+    tool_calls = []
+    original_call_tool = McpClient.call_tool
+
+    async def observe_call_tool(self, name: str, arguments: dict):
+        result = await original_call_tool(self, name, arguments)
+        tool_calls.append((name, arguments))
+        return result
+
+    monkeypatch.setattr(McpClient, "call_tool", observe_call_tool)
+
+    with TestClient(app) as client:
+        hours_response = _post_authenticated_message(client, "What are your hours?")
+        comparison_response = _post_authenticated_message(
+            client,
+            "How much is a haircut, and how much is a beard trim?",
+        )
+
+    assert hours_response.status_code == 200
+    hours_text = hours_response.json()["assistant_message"]["text"]
+    assert "09:00" in hours_text
+    assert "closed Sunday" in hours_text
+    assert comparison_response.status_code == 200
+    comparison_text = comparison_response.json()["assistant_message"]["text"]
+    assert "$35" in comparison_text
+    assert "$18" in comparison_text
+    assert tool_calls == []
+
+
+def test_authenticated_single_service_faq_falls_back_when_mcp_server_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import backend.mcp_client as mcp_client_module
+
+    monkeypatch.setenv("TECHOHUB_RUNTIME", "local")
+    monkeypatch.setenv("TECHOHUB_MCP_ENABLED", "true")
+    monkeypatch.setattr(
+        mcp_client_module,
+        "MCP_SERVER_COMMAND",
+        str(tmp_path / "missing-mcp-server"),
+    )
+    app = create_app(
+        f"sqlite:///{(tmp_path / 'mcp_unavailable.sqlite3').as_posix()}"
+    )
+
+    with TestClient(app) as client:
+        response = _post_authenticated_message(
+            client, "What is the price and duration of a haircut?"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["assistant_message"]["text"] == (
+        "A haircut costs $35 and takes about 30 minutes."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -434,13 +621,13 @@ async def test_rag_on_lexical_mcp_on_faq_through_mcp(
     """RAG ON (lexical) + MCP ON: FAQ goes through MCP faq_retrieve tool."""
     app = create_app(
         f"sqlite:///{(tmp_path / 'rag_on_mcp_on.sqlite3').as_posix()}",
-        classifier=_FaqClassifier(),
+        classifier=RuleFirstIntentClassifier(FakeGroq()),
     )
     Base.metadata.create_all(app.state.database_engine)
     try:
         with app.state.session_factory() as db:
             workflow = ConversationWorkflow(
-                classifier=_FaqClassifier(),
+                classifier=RuleFirstIntentClassifier(FakeGroq()),
                 knowledge=KnowledgeService(),
                 availability=AvailabilityConversationService(),
                 rag_retriever=RagRetriever(),
@@ -448,21 +635,19 @@ async def test_rag_on_lexical_mcp_on_faq_through_mcp(
                 rag_provider="lexical",
                 mcp_enabled=True,
             )
-            async with mcp_client_session() as mcp_client:
-                faq_agent = workflow._agent_registry.get(
-                    Intent.FAQ_BUSINESS_HOURS
-                )
-                assert faq_agent is not None
-                faq_agent._mcp_client = mcp_client
-
-                result = await workflow.run(
-                    session_id=uuid4(),
-                    request=_make_customer_request("How much is a haircut?"),
-                    db=db,
-                )
+            request = _make_customer_request("How much is a haircut?")
+            result = await workflow.run(
+                session_id=request.session_id,
+                request=request,
+                db=db,
+            )
 
             assert result.outcome == "answered"
-            assert "$35" in result.response_text or "35.00" in result.response_text
+            assert result.response_text == "A haircut costs $35."
+            assert result.source_ids == (
+                "fixture:demo-salon-v1:service:haircut",
+            )
+            assert result.retrieval_reason == ("mcp_faq_retrieve",)
     finally:
         app.state.database_engine.dispose()
 

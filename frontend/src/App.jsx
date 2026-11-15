@@ -183,7 +183,7 @@ export default function App() {
       );
       const openedSession = result.session;
       sessionRef.current = openedSession;
-      sessionAccessTokenRef.current = result.accessToken;
+      sessionAccessTokenRef.current = result.access_token;
       setSession(openedSession);
       setMessages([
         {

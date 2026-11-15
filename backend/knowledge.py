@@ -178,13 +178,15 @@ class KnowledgeIndex:
                 return _ambiguous("multiple_or_conflicting_days")
             return _hours_result(self.records, days)
 
+        service_matches = _match_services(self.records, query)
         matched_faqs = _match_faq_records(self.records, query)
-        if len(matched_faqs) > 1:
+        # A broad FAQ keyword such as "price" or "duration" must not replace
+        # a named service's canonical facts with the entire catalog paragraph.
+        if not service_matches and len(matched_faqs) > 1:
             return _ambiguous("multiple_approved_faqs")
-        if matched_faqs:
+        if not service_matches and matched_faqs:
             return _matched("approved_faq", matched_faqs)
 
-        service_matches = _match_services(self.records, query)
         has_service_topic = bool(tokens & _SERVICE_QUESTION_TERMS) or bool(
             service_matches
         )

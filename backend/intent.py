@@ -409,7 +409,7 @@ class RuleFirstIntentClassifier:
             and (
                 len(rule_result.intents) == 1
                 or rule_result.reason_code
-                == "compound_hours_and_service_information"
+                in {"compound_hours_and_service_information", "multiple_service_information"}
             )
         ):
             return rule_result
@@ -510,6 +510,22 @@ def classify_with_rules(
         )
     if _is_complaint(tokens):
         return _rule_result(Intent.COMPLAINT, reason="customer_support_request")
+
+    # Multiple approved services are valid for FAQ comparisons. Availability
+    # still requires an unambiguous service selection below.
+    if (
+        len(mentioned_service_ids(normalized, service_records)) > 1
+        and _is_explicit_service_information_request(tokens)
+        and not tokens & {"slot", "slots", "appointment", "appointments", "available", "availability"}
+    ):
+        intents = (Intent.FAQ_SERVICE_POLICY,)
+        if _is_hours_question(tokens):
+            intents = (Intent.FAQ_BUSINESS_HOURS, Intent.FAQ_SERVICE_POLICY)
+        return _rule_result(
+            *intents,
+            entities=ClassificationEntities(requested_date=date_entity),
+            reason="multiple_service_information",
+        )
 
     hours = _is_hours_question(tokens)
     availability = _is_availability_question(tokens, service_id)
@@ -625,7 +641,7 @@ def _clarification(
 
 def _is_human_request(text: str) -> bool:
     patterns = (
-        r"\b(?:talk|speak|connect|transfer)\s+(?:to\s+)?(?:a\s+)?(?:human|person|someone|staff|agent)\b",
+        r"\b(?:talk|speak|connect|transfer)\s+(?:(?:to|with)\s+)?(?:a\s+)?(?:human|person|someone|staff|agent)\b",
         r"\bhuman\s+(?:please|agent|support)\b",
         r"\breal\s+person\b",
     )
@@ -665,6 +681,7 @@ def _is_explicit_service_information_request(tokens: set[str]) -> bool:
             "offer",
             "offers",
             "price",
+            "prices",
             "pricing",
             "provide",
             "service",
@@ -683,6 +700,7 @@ def _is_service_question(tokens: set[str], service_id: str | None) -> bool:
         "offer",
         "offers",
         "price",
+        "prices",
         "pricing",
         "provide",
         "service",

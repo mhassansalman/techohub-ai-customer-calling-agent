@@ -248,6 +248,9 @@ class FaqAgent:
         self._mcp_client = mcp_client
 
     def _lookup(self, text: str) -> KnowledgeAnswer:
+        scoped = self._knowledge.retrieve(text)
+        if scoped.status.value == "matched" and len(scoped.records) == 1:
+            return self._knowledge.answer(text)
         # Try semantic retrieval first, fall back to lexical, then OKF.
         answer = self._retriever.answer(text)
         if answer.status.value == "answered":
@@ -323,19 +326,31 @@ class FaqAgent:
                 mcp_result = await self._mcp_client.call_tool(
                     "faq_retrieve", {"query": text}
                 )
-                if not mcp_result.get("is_error"):
-                    structured = mcp_result.get("structured") or {}
-                    return {
-                        "intent": Intent.FAQ_BUSINESS_HOURS,
-                        "text": mcp_result["content"],
-                        "source_ids": tuple(
-                            structured.get("source_ids", ())
-                        ),
-                        "outcome": "answered"
-                        if structured.get("status") == "answered"
-                        else "unsupported",
-                        "retrieval_reason": ("mcp_faq_retrieve",),
-                    }
+                structured = mcp_result.get("structured")
+                if not mcp_result.get("is_error") and isinstance(structured, dict):
+                    response_text = structured.get("text")
+                    status = structured.get("status")
+                    source_ids = structured.get("source_ids")
+                    if (
+                        isinstance(response_text, str)
+                        and response_text.strip()
+                        and status in {"answered", "abstained"}
+                        and isinstance(source_ids, list)
+                        and all(
+                            isinstance(source_id, str) and source_id
+                            for source_id in source_ids
+                        )
+                        and (status != "answered" or source_ids)
+                    ):
+                        return {
+                            "intent": Intent.FAQ_BUSINESS_HOURS,
+                            "text": response_text,
+                            "source_ids": tuple(source_ids),
+                            "outcome": (
+                                "answered" if status == "answered" else "unsupported"
+                            ),
+                            "retrieval_reason": ("mcp_faq_retrieve",),
+                        }
             except Exception:
                 # MCP failure: fall through to deterministic OKF path.
                 pass

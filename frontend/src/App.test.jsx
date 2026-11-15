@@ -87,12 +87,18 @@ function mockApi({
           ? SESSION_ID
           : `2608b129-9ab8-46f7-9dd7-${String(sessionNumber).padStart(12, "0")}`;
       const sessionChannel = JSON.parse(options.body).channel_type;
-      sessions.set(sessionId, { ended: false, channel: sessionChannel });
+      const accessToken = `test-session-token-${sessionNumber}`;
+      sessions.set(sessionId, {
+        ended: false,
+        channel: sessionChannel,
+        accessToken,
+      });
       return new Response(
         JSON.stringify({
           session: sessionPayload("active", sessionChannel, sessionId),
           assistant_disclosure:
             "I am an automated assistant. Typed messages and recognized speech transcripts are stored to support the conversation. Microphone audio is not stored.",
+          access_token: accessToken,
         }),
         { status: 201, headers: { "Content-Type": "application/json" } },
       );
@@ -103,6 +109,9 @@ function mockApi({
       const currentSession = sessions.get(sessionId);
       if (!currentSession) {
         return new Response(JSON.stringify({ detail: "not found" }), { status: 404 });
+      }
+      if (options.headers?.["X-Session-Token"] !== currentSession.accessToken) {
+        return new Response(JSON.stringify({ detail: "unauthorized" }), { status: 401 });
       }
       if (statusStatus) {
         return new Response(JSON.stringify({ detail: "private backend detail" }), {
@@ -120,6 +129,14 @@ function mockApi({
       });
     }
     if (sessionRoute && sessionRoute[2] === "messages") {
+      const [, sessionId] = sessionRoute;
+      const currentSession = sessions.get(sessionId);
+      if (!currentSession) {
+        return new Response(JSON.stringify({ detail: "not found" }), { status: 404 });
+      }
+      if (options.headers?.["X-Session-Token"] !== currentSession.accessToken) {
+        return new Response(JSON.stringify({ detail: "unauthorized" }), { status: 401 });
+      }
       if (sendDelay) {
         await (Array.isArray(sendDelay) ? sendDelay.shift() : sendDelay);
       }
@@ -130,7 +147,6 @@ function mockApi({
         });
       }
       messageNumber += 1;
-      const [, sessionId] = sessionRoute;
       const payload = JSON.parse(options.body);
       const responseText = Array.isArray(assistantText)
         ? assistantText[Math.min(messageNumber - 1, assistantText.length - 1)]
@@ -160,6 +176,9 @@ function mockApi({
       const currentSession = sessions.get(sessionId);
       if (!currentSession) {
         return new Response(JSON.stringify({ detail: "not found" }), { status: 404 });
+      }
+      if (options.headers?.["X-Session-Token"] !== currentSession.accessToken) {
+        return new Response(JSON.stringify({ detail: "unauthorized" }), { status: 401 });
       }
       currentSession.ended = true;
       return new Response(JSON.stringify(sessionPayload(
@@ -280,6 +299,48 @@ async function waitForCallOnlyReady() {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+describe("single-word transcript delivery", () => {
+  const cases = ["mic", "live", "call-only"].flatMap((mode) =>
+    ["final", "interim-end", "interim-no-speech"].flatMap((delivery) =>
+      ["yes", "no", "okay", "thanks", "cancel"].map((word) => [mode, delivery, word]),
+    ),
+  );
+
+  it.each(cases)("submits %s / %s / %s once with session authentication", async (mode, delivery, word) => {
+    const calls = mockApi({ assistantText: "Your reply was received." });
+    const voice = mockVoice();
+    render(<App />);
+    if (mode === "call-only") {
+      await waitForCallOnlyReady();
+    } else {
+      await waitForReady({ mode });
+      if (mode === "mic") {
+        fireEvent.click(screen.getByRole("button", { name: "Start voice input" }));
+      }
+    }
+    await waitFor(() => expect(voice.recognitions).toHaveLength(1));
+    const recognition = voice.recognitions[0];
+    expect(recognition.lang).toBe("en-US");
+    expect(recognition.continuous).toBe(false);
+    expect(recognition.interimResults).toBe(true);
+    emitRecognitionResult(recognition, word, delivery === "final", 0.95);
+    if (delivery === "interim-no-speech") recognition.onerror({ error: "no-speech" });
+    if (delivery !== "final") recognition.onend();
+    await waitFor(() => expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(1));
+    const sent = calls.find((call) => call.url.endsWith("/messages"));
+    expect(sent.options.headers["X-Session-Token"]).toBe("test-session-token-1");
+    expect(JSON.parse(sent.options.body)).toMatchObject({
+      message_text: word,
+      modality: "speech_transcript",
+      language: "en-US",
+      asr_confidence: 0.95,
+      channel_type: mode === "mic" ? "text_web" : "browser_voice",
+    });
+    await waitFor(() => expect(voice.synthesis.speak).toHaveBeenCalledOnce());
+    expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(1);
+  });
 });
 
 // Restore globalThis.fetch after each test to avoid mock leakage
@@ -503,6 +564,37 @@ describe("Call-Only experience", () => {
 });
 
 describe("browser text chat", () => {
+  it("uses the issued session token for status, message, and end requests", async () => {
+    const calls = mockApi();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady({ mode: "message" });
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Your message" }),
+      "Check the session token",
+    );
+    await user.keyboard("{Enter}");
+    expect(await screen.findByText(interim)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "End Call" }));
+    expect(
+      await screen.findByText("Conversation ended. Your messages were saved."),
+    ).toBeInTheDocument();
+
+    const authenticatedRequests = calls.filter((call) =>
+      call.url.startsWith(`/api/sessions/${SESSION_ID}`),
+    );
+    expect(authenticatedRequests.length).toBeGreaterThanOrEqual(4);
+    expect(authenticatedRequests.some((call) => call.url.endsWith("/messages"))).toBe(true);
+    expect(authenticatedRequests.some((call) => call.url.endsWith("/end"))).toBe(true);
+    expect(
+      authenticatedRequests.every(
+        (call) => Boolean(call.options.headers?.["X-Session-Token"]),
+      ),
+    ).toBe(true);
+  });
+
   it.each([
     ["message", "mic"],
     ["mic", "message"],

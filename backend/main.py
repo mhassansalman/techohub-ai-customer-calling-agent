@@ -6,6 +6,7 @@ import os
 import secrets
 from contextlib import asynccontextmanager
 from collections.abc import Generator
+from pathlib import Path as FilePath
 from typing import AsyncIterator
 from uuid import UUID
 
@@ -13,6 +14,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 from sqlalchemy.exc import ArgumentError
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from backend.availability import AvailabilityConversationService
@@ -175,8 +177,17 @@ def create_app(
     workflow: ConversationWorkflow | None = None,
     classifier: IntentClassifier | None = None,
 ) -> FastAPI:
-    is_vercel = bool(os.getenv("VERCEL"))
-    resolved_database_url = database_url or os.getenv("DATABASE_URL") or None
+    runtime = os.getenv("TECHOHUB_RUNTIME", "auto").strip().lower()
+    if runtime not in {"auto", "local"}:
+        raise ValueError("TECHOHUB_RUNTIME must be auto or local.")
+    is_vercel = bool(os.getenv("VERCEL")) and runtime != "local"
+    if runtime == "local":
+        local_default = f"sqlite:///{(FilePath(__file__).resolve().parents[1] / 'data' / 'techohub.db').as_posix()}"
+        resolved_database_url = database_url or os.getenv("TECHOHUB_LOCAL_DATABASE_URL") or local_default
+        if make_url(resolved_database_url).get_backend_name() != "sqlite":
+            raise ValueError("Local runtime requires a SQLite database URL.")
+    else:
+        resolved_database_url = database_url or os.getenv("DATABASE_URL") or None
     if is_vercel:
         if not resolved_database_url:
             raise RuntimeError(

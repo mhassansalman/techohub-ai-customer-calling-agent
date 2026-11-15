@@ -742,11 +742,11 @@ def test_handoff_confirmation_rejection_ambiguity_and_unrelated_turns(
         unrelated_session = _start_session(client)
         _send(client, unrelated_session, "I want to speak to someone.")
         hours = _send(client, unrelated_session, "Are you open Saturday?")
-        assert "yes or no" in (
+        assert "Saturday, 10:00" in (
             hours.json()["assistant_message"]["text"]
         )
         rejected_after_clarification = _send(client, unrelated_session, "no")
-        assert "won't create a support ticket" in (
+        assert "Thanks. What can I help you with?" in (
             rejected_after_clarification.json()["assistant_message"]["text"]
         )
 
