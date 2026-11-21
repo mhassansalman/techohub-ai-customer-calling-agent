@@ -20,9 +20,8 @@ function toDisplayMessage(message) {
 
 function isHandoffConfirmationPrompt(text) {
   return (
-    text === "Please say yes or no, or use the confirmation buttons." ||
-    text === "I heard both yes and no. Would you like me to create a support ticket?" ||
-    text.includes("Would you like me to create a queued support ticket for staff to follow up?")
+    text.includes("Would you like me to create a support ticket for staff to follow up?") ||
+    text.includes("Please say 'Yes, create a ticket' or 'No, cancel the request'.")
   );
 }
 
@@ -315,9 +314,15 @@ export default function App() {
     handleStartVoiceLiveCall();
   }, [liveCallTtsFinished, interactionMode, callActive, busy, listening]);
 
-  async function submitMessage(text, { speakResponse = false, sessionId, modality = "text", language, asrConfidence, voiceAttemptId } = {}) {
+  function shouldSpeakAssistantResponse() {
+    return experience === "call-only" || interactionMode !== "message";
+  }
+
+  async function submitMessage(text, { sessionId, modality = "text", language, asrConfidence, voiceAttemptId } = {}) {
     const messageText = text.trim();
     const targetSessionId = sessionId ?? sessionRef.current?.session_id;
+    const shouldSpeakResponse = shouldSpeakAssistantResponse();
+    const responseVoiceAttemptId = voiceAttemptId ?? voiceAttemptRef.current;
     if (
       !messageText ||
       !targetSessionId ||
@@ -326,6 +331,11 @@ export default function App() {
       busy
     ) {
       return false;
+    }
+
+    if (shouldSpeakResponse && interactionMode === "live") {
+      liveCallRestartNeededRef.current = true;
+      setLiveCallTtsFinished(false);
     }
 
     sendingRef.current = true;
@@ -385,14 +395,14 @@ export default function App() {
         }
       }
       if (
-        speakResponse &&
+        shouldSpeakResponse &&
         sessionRef.current?.status === "active" &&
-        (voiceAttemptId === undefined || voiceAttemptId === voiceAttemptRef.current)
+        responseVoiceAttemptId === voiceAttemptRef.current
       ) {
         speakAssistantResponse(
           result.assistant_message.text,
           targetSessionId,
-          voiceAttemptId,
+          responseVoiceAttemptId,
         );
       }
       return true;
@@ -403,7 +413,7 @@ export default function App() {
         sessionRef.current = closedSession;
         setSession(closedSession);
       }
-      if (voiceAttemptId === voiceAttemptRef.current) {
+      if (shouldSpeakResponse && responseVoiceAttemptId === voiceAttemptRef.current) {
         liveCallRestartNeededRef.current = false;
         setLiveCallTtsFinished(false);
       }
@@ -416,6 +426,21 @@ export default function App() {
         inputRef.current?.focus();
       }
     }
+  }
+
+  function handleHandoffConfirmation(text) {
+    if (sendingRef.current || busy || !callActive) return;
+
+    if (shouldSpeakAssistantResponse()) {
+      const voiceAttemptId = ++voiceAttemptRef.current;
+      abortRecognition();
+      voiceSubmissionRef.current = false;
+      setListening(false);
+      void submitMessage(text, { voiceAttemptId });
+      return;
+    }
+
+    void submitMessage(text);
   }
 
   async function loadServices() {
@@ -596,7 +621,6 @@ export default function App() {
       recognition.stop();
 
       void submitMessage(transcript, {
-        speakResponse: true,
         sessionId,
         modality: "speech_transcript",
         language: "en-US",
@@ -632,7 +656,6 @@ export default function App() {
           setDraft(latestTranscript);
           updateVoiceFeedback("Speech recognized. Sending your message…");
           void submitMessage(latestTranscript, {
-            speakResponse: true,
             sessionId,
             modality: "speech_transcript",
             language: "en-US",
@@ -748,7 +771,6 @@ export default function App() {
       liveCallRestartNeededRef.current = true;
 
       void submitMessage(transcript, {
-        speakResponse: true,
         sessionId,
         modality: "speech_transcript",
         language: "en-US",
@@ -795,7 +817,6 @@ export default function App() {
           liveCallRestartNeededRef.current = true;
 
           void submitMessage(latestTranscript, {
-            speakResponse: true,
             sessionId,
             modality: "speech_transcript",
             language: "en-US",
@@ -1173,7 +1194,9 @@ export default function App() {
 
         <p className="demo-note">
           Demo mode: answers use approved salon information and recorded sample
-          appointment slots. Booking and staff actions are not available.
+          appointment slots. Support ticket requests can be recorded after
+          confirmation; live staff interaction and real appointment booking are
+          not available in this demo.
         </p>
 
         <div className="browse-services-toolbar">
@@ -1286,17 +1309,17 @@ export default function App() {
                     <div className="handoff-actions" aria-label="Ticket confirmation">
                       <button
                         type="button"
-                        onClick={() => void submitMessage("yes")}
+                        onClick={() => handleHandoffConfirmation("Yes, create a ticket")}
                         disabled={!callActive || busy}
                       >
-                        Yes, create ticket
+                        Create Ticket
                       </button>
                       <button
                         type="button"
-                        onClick={() => void submitMessage("no")}
+                        onClick={() => handleHandoffConfirmation("No, cancel the request")}
                         disabled={!callActive || busy}
                       >
-                        No, thanks
+                        Cancel
                       </button>
                     </div>
                   )}

@@ -570,7 +570,11 @@ class SupportAgent:
         ):
             return {
                 "intent": Intent.HUMAN_REQUEST,
-                "text": "Would you like me to create a queued support ticket for staff to follow up? Please reply yes or no.",
+                "text": (
+                    "Would you like me to create a support ticket for staff to "
+                    "follow up? You can say 'Yes, create a ticket' or "
+                    "'No, cancel the request'."
+                ),
                 "source_ids": (),
                 "outcome": "handoff_unavailable",
                 "retrieval_reason": "human_request_detected",

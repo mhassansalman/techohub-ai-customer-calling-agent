@@ -17,6 +17,7 @@ from backend.fixtures import (
     availability_for_date,
     load_demo_salon_fixture,
 )
+from backend.intent import is_date_only_followup
 from backend.models import (
     AvailabilityConversationContext,
     ConversationSession,
@@ -280,7 +281,6 @@ class AvailabilityConversationService:
             )
 
         has_availability_intent = _has_availability_intent(message)
-        is_correction = _has_correction_intent(message)
         service_result = _match_service(
             message,
             self.availability.fixture.services,
@@ -294,6 +294,10 @@ class AvailabilityConversationService:
 
         context = db.get(AvailabilityConversationContext, session_key)
         pending_date_context = db.get(PendingAvailabilityDateContext, session_key)
+        is_correction = _has_correction_intent(
+            message,
+            has_availability_context=context is not None,
+        )
         if (
             not has_availability_intent
             and not is_correction
@@ -679,9 +683,15 @@ def _has_availability_intent(message: str) -> bool:
     return bool(tokens & _AVAILABILITY_TERMS)
 
 
-def _has_correction_intent(message: str) -> bool:
+def _has_correction_intent(
+    message: str,
+    *,
+    has_availability_context: bool = False,
+) -> bool:
     tokens = set(_tokens(message))
-    return bool(tokens & _CORRECTION_TERMS)
+    return bool(tokens & _CORRECTION_TERMS) or (
+        has_availability_context and is_date_only_followup(message)
+    )
 
 
 def _tokens(value: str) -> set[str]:

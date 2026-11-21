@@ -8,7 +8,13 @@ from sqlalchemy import event, select
 
 from backend.main import WORKFLOW_FAILURE_RESPONSE, create_app
 from backend.models import AuditEvent, HandoffTicket, Message
-from backend.workflow import HANDOFF_CLARIFICATION_PROMPT, HANDOFF_CONFIRMATION_PROMPT, HANDOFF_CONFLICT_PROMPT
+from backend.workflow import (
+    HANDOFF_ACKNOWLEDGMENT,
+    HANDOFF_CLARIFICATION_PROMPT,
+    HANDOFF_CONFIRMATION_PROMPT,
+    HANDOFF_CONFLICT_PROMPT,
+    HANDOFF_PENDING_ACKNOWLEDGMENT_PROMPT,
+)
 
 
 @pytest.fixture
@@ -44,7 +50,8 @@ def tickets(app, sid):
 @pytest.mark.parametrize('answer', [
     'yes create a ticket', 'create my ticket', 'Yes, create a ticket.',
     'please create my support ticket', 'yes please create a support ticket',
-    'queue the ticket', 'yes', 'okay',
+    'queue the ticket', 'yes', 'yep', 'yeah', 'sure', 'please do', 'go ahead',
+    'okay',
 ])
 def test_clear_consent_queues_one_ticket_and_duplicate_does_not(app, answer):
     with TestClient(app) as client:
@@ -66,8 +73,9 @@ def test_clear_consent_queues_one_ticket_and_duplicate_does_not(app, answer):
 
 
 @pytest.mark.parametrize('answer', [
-    'no', 'cancel', 'cancel my ticket', 'no do not create a ticket',
-    "don't create my support ticket", 'no thanks',
+    'no', 'nope', 'cancel', 'cancel my ticket', 'no do not create a ticket',
+    "don't create a ticket", "don't create my support ticket", 'no thanks',
+    'No, cancel the request',
 ])
 def test_clear_negative_cancels_pending_operation(app, answer):
     with TestClient(app) as client:
@@ -80,7 +88,8 @@ def test_clear_negative_cancels_pending_operation(app, answer):
 
 @pytest.mark.parametrize('answer', [
     'maybe', 'yes no', 'yes create a ticket but no',
-    'I said yes to my friend', 'yes how much is a haircut', 'thanks',
+    'I said yes to my friend', 'yes how much is a haircut', 'not sure',
+    "don't do it",
 ])
 def test_ambiguous_or_unrelated_affirmation_never_creates_ticket(app, answer):
     with TestClient(app) as client:
@@ -91,6 +100,45 @@ def test_ambiguous_or_unrelated_affirmation_never_creates_ticket(app, answer):
         assert tickets(app, sid) == []
         assert 'has been queued' in send(client, sid, headers, 'yes create a ticket')
         assert len(tickets(app, sid)) == 1
+
+
+@pytest.mark.parametrize(
+    'answer',
+    ['thank', 'thanks', 'thank you', 'thank u', 'appreciate it'],
+)
+def test_short_thanks_phrases_receive_a_natural_acknowledgment(app, answer):
+    with TestClient(app) as client:
+        sid, headers = start(client)
+        assert send(client, sid, headers, answer) == HANDOFF_ACKNOWLEDGMENT
+        assert tickets(app, sid) == []
+
+
+def test_thanks_during_pending_confirmation_acknowledges_and_preserves_context(app):
+    with TestClient(app) as client:
+        sid, headers = start(client)
+        send(client, sid, headers, 'I want to talk to a human')
+
+        assert send(client, sid, headers, 'thank') == (
+            HANDOFF_PENDING_ACKNOWLEDGMENT_PROMPT
+        )
+        assert tickets(app, sid) == []
+        assert 'has been queued' in send(
+            client,
+            sid,
+            headers,
+            'yes, create a ticket',
+        )
+        assert len(tickets(app, sid)) == 1
+
+
+@pytest.mark.parametrize('answer', ['yes', 'yep', 'yes, create a ticket'])
+def test_confirmation_outside_pending_context_never_creates_ticket(app, answer):
+    with TestClient(app) as client:
+        sid, headers = start(client)
+        response = send(client, sid, headers, answer)
+
+        assert 'has been queued' not in response
+        assert tickets(app, sid) == []
 
 
 @pytest.mark.parametrize('new_request, expected', [

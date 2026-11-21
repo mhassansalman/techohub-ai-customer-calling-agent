@@ -442,7 +442,7 @@ def test_api_creates_confirmed_ticket_and_returns_persisted_id_once(
             json=request_payload,
         )
         assert handoff_request.status_code == 200
-        assert "reply yes or no" in handoff_request.json()[
+        assert "Yes, create a ticket" in handoff_request.json()[
             "assistant_message"
         ]["text"]
 
@@ -459,7 +459,7 @@ def test_api_creates_confirmed_ticket_and_returns_persisted_id_once(
             headers=_token_headers(session_id),
             json=ambiguous_payload,
         )
-        assert "yes or no" in ambiguous.json()["assistant_message"]["text"]
+        assert "Yes, create a ticket" in ambiguous.json()["assistant_message"]["text"]
         with app.state.session_factory() as db:
             assert db.scalar(select(HandoffTicket)) is None
 
@@ -583,7 +583,7 @@ def test_confirmed_ticket_is_retrievable_through_staff_api(
             json=request_payload,
         )
         assert handoff_request.status_code == 200
-        assert "reply yes or no" in handoff_request.json()[
+        assert "Yes, create a ticket" in handoff_request.json()[
             "assistant_message"
         ]["text"]
 
@@ -952,7 +952,7 @@ def test_concurrent_sessions_have_strict_data_and_handoff_isolation(
         )
         assert res_a1.status_code == 200
         assert (
-            "Would you like me to create a queued support ticket"
+            "Would you like me to create a support ticket"
             in res_a1.json()["assistant_message"]["text"]
         )
 

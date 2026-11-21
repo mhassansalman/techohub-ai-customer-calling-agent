@@ -47,6 +47,10 @@ _SERVICE_INTEREST_TERMS = {
     "wants",
 }
 _ISO_DATE = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
+_DATE_ONLY_FOLLOWUP = re.compile(
+    r"what\s+about\s+(?:on\s+)?([a-z]+|\d{4}-\d{2}-\d{2})\s*[?.!]*",
+    re.IGNORECASE,
+)
 _WEEKDAYS = (
     "monday",
     "tuesday",
@@ -475,7 +479,9 @@ def classify_with_rules(
     service_records = services or load_demo_salon_fixture().services
     service_id, unknown_service = _service_mention(normalized, service_records)
     date_entity = _date_entity(normalized)
-    date_correction = bool(tokens & {"actually", "instead", "meant", "sorry"})
+    date_correction = bool(tokens & {"actually", "instead", "meant", "sorry"}) or (
+        has_pending_availability_context and is_date_only_followup(normalized)
+    )
 
     if _is_human_request(normalized):
         return _rule_result(Intent.HUMAN_REQUEST, reason="explicit_human_request")
@@ -797,6 +803,11 @@ def _date_entity(text: str) -> str | None:
         if re.search(rf"\b{alias}\b", text):
             return alias
     return None
+
+
+def is_date_only_followup(text: str) -> bool:
+    match = _DATE_ONLY_FOLLOWUP.fullmatch(text.strip())
+    return match is not None and _date_entity(match.group(1).casefold()) is not None
 
 
 def _has_conflicting_dates(text: str) -> bool:

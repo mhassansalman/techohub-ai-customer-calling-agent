@@ -40,7 +40,11 @@ from backend.models import (
     PendingAvailabilityDateContext,
 )
 from backend.rag import RagRetriever
-from backend.workflow import ConversationWorkflow, _handoff_confirmation_decision
+from backend.workflow import (
+    HANDOFF_CLARIFICATION_PROMPT,
+    ConversationWorkflow,
+    _handoff_confirmation_decision,
+)
 
 # Per-session access tokens issued at session start. Session-scoped endpoints
 # now require the X-Session-Token header, so tests capture the token returned
@@ -360,6 +364,39 @@ def test_saturday_instead_follow_up_uses_saved_availability_context(
     assert "Recorded fixture availability for haircut on 2026-10-30" in friday_text
     assert "Recorded fixture availability for haircut on 2026-10-31" in saturday_text
     assert "10:00 Etc/UTC" in saturday_text
+
+
+def test_date_only_follow_up_reuses_context_without_reclassifying_unrelated_requests(
+    tmp_path: Path,
+) -> None:
+    app = _create_app(tmp_path)
+    with TestClient(app) as client:
+        session_id = _start_session(client)
+        friday = _send(
+            client,
+            session_id,
+            "Do you have a haircut appointment Friday?",
+        )
+        saturday = _send(client, session_id, "What about Saturday?")
+        saturday_hours = _send(client, session_id, "What about Saturday hours?")
+
+        other_session_id = _start_session(client)
+        without_context = _send(client, other_session_id, "What about Saturday?")
+
+    friday_text = friday.json()["assistant_message"]["text"]
+    saturday_text = saturday.json()["assistant_message"]["text"]
+    saturday_hours_text = saturday_hours.json()["assistant_message"]["text"]
+    without_context_text = without_context.json()["assistant_message"]["text"]
+
+    assert friday.status_code == saturday.status_code == 200
+    assert "Recorded fixture availability for haircut on 2026-10-30" in friday_text
+    assert "Recorded fixture availability for haircut on 2026-10-31" in saturday_text
+    assert "10:00 Etc/UTC" in saturday_text
+    assert saturday_hours.status_code == 200
+    assert "open on Saturday" in saturday_hours_text
+    assert "Recorded fixture availability" not in saturday_hours_text
+    assert without_context.status_code == 200
+    assert "Recorded fixture availability" not in without_context_text
 
 
 @pytest.mark.parametrize(
@@ -719,7 +756,7 @@ def test_complaint_does_not_create_ticket_and_human_request_asks_confirmation(
     human_text = human.json()["assistant_message"]["text"].casefold()
     assert complaint.status_code == human.status_code == 200
     assert "can't create a support ticket" in complaint_text
-    assert "would you like me to create a queued support ticket" in human_text
+    assert "would you like me to create a support ticket" in human_text
     with app.state.session_factory() as db:
         assert db.scalar(select(HandoffTicket)) is None
 
@@ -731,9 +768,9 @@ def test_handoff_confirmation_rejection_ambiguity_and_unrelated_turns(
     with TestClient(app) as client:
         rejected_session = _start_session(client)
         request = _send(client, rejected_session, "I want to speak to someone.")
-        assert "reply yes or no" in request.json()["assistant_message"]["text"]
+        assert "Yes, create a ticket" in request.json()["assistant_message"]["text"]
         ambiguous = _send(client, rejected_session, "maybe")
-        assert "yes or no" in ambiguous.json()["assistant_message"]["text"]
+        assert "Yes, create a ticket" in ambiguous.json()["assistant_message"]["text"]
         rejected = _send(client, rejected_session, "No, thank you.")
         assert "won't create a support ticket" in (
             rejected.json()["assistant_message"]["text"]
@@ -866,7 +903,7 @@ def test_repeated_handoff_confirmation_tokens_are_safe_and_idempotent(
         if create_pending_request:
             request = _send(client, session_id, "I want to speak to someone.")
             assert request.status_code == 200
-            assert "yes or no" in request.json()["assistant_message"]["text"]
+            assert "Yes, create a ticket" in request.json()["assistant_message"]["text"]
 
         response = _send(client, session_id, confirmation)
         assert response.status_code == 200
@@ -903,7 +940,7 @@ def test_repeated_handoff_confirmation_tokens_are_safe_and_idempotent(
             )
         elif expected_decision == "clarify":
             assert tickets == []
-            assert "yes or no" in (
+            assert "Yes, create a ticket" in (
                 response.json()["assistant_message"]["text"]
             )
         elif expected_decision == "conflict":
@@ -914,7 +951,7 @@ def test_repeated_handoff_confirmation_tokens_are_safe_and_idempotent(
         elif expected_decision == "unrecognized":
             assert tickets == []
             assert response.json()["assistant_message"]["text"] == (
-                "Please say yes or no, or use the confirmation buttons."
+                HANDOFF_CLARIFICATION_PROMPT
             )
         else:
             assert tickets == []
@@ -1409,7 +1446,7 @@ def test_workflow_handoff_unchanged_with_rag_flag(
     with TestClient(app) as client:
         session_id = _start_session(client)
         request = _send(client, session_id, "I want to speak to someone.")
-        assert "reply yes or no" in request.json()["assistant_message"]["text"]
+        assert "Yes, create a ticket" in request.json()["assistant_message"]["text"]
         confirmed = _send(client, session_id, "yes please")
 
     assert "ticket ID" in confirmed.json()["assistant_message"]["text"]

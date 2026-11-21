@@ -165,7 +165,11 @@ async def support_info(intent: str) -> dict[str, Any]:
     if intent == Intent.HUMAN_REQUEST.value:
         return {
             "intent": Intent.HUMAN_REQUEST.value,
-            "text": "Would you like me to create a queued support ticket for staff to follow up? Please reply yes or no.",
+            "text": (
+                "Would you like me to create a support ticket for staff to "
+                "follow up? You can say 'Yes, create a ticket' or "
+                "'No, cancel the request'."
+            ),
             "outcome": "handoff_unavailable",
             "ticket_creation_requires_confirmation": True,
         }

@@ -141,7 +141,7 @@ def test_support_agent_human_request() -> None:
     request = _make_customer_request("I want to speak to someone.")
     result = agent.handle(request, None, str(uuid4()), uuid4())
     assert result["intent"] == Intent.HUMAN_REQUEST
-    assert "queued support ticket" in result["text"]
+    assert "create a support ticket" in result["text"]
     assert result["outcome"] == "handoff_unavailable"
 
 

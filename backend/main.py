@@ -77,19 +77,23 @@ WORKFLOW_FAILURE_RESPONSE = (
 SESSION_TOKEN_HEADER = "X-Session-Token"
 
 
-def _cors_allow_origins() -> list[str]:
-    """Parse comma-separated allowed origins from configuration.
+def _cors_allow_origins(*, local_runtime: bool = False) -> list[str]:
+    """Resolve configured origins, with standard Vite origins for local runtime.
 
-    Defaults to allowing no cross-origin browser traffic. Render operators set
-    TECHOHUB_CORS_ORIGINS to the public frontend origin(s) (e.g. the Vercel
-    Hobby URL). Never allow ``*`` for session-scoped endpoints in production.
+    Explicit origins extend the local defaults. Production allows only origins
+    configured with TECHOHUB_CORS_ORIGINS; never allow ``*`` for sessions.
     """
     raw = os.getenv("TECHOHUB_CORS_ORIGINS", "").strip()
-    if not raw:
-        return []
     origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
     if "*" in origins:
         raise ValueError("TECHOHUB_CORS_ORIGINS must not contain a wildcard.")
+    if local_runtime:
+        origins = [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            *origins,
+        ]
+    origins = list(dict.fromkeys(origins))
     return origins
 
 
@@ -202,7 +206,7 @@ def create_app(
             raise RuntimeError(
                 "DATABASE_URL must be a valid PostgreSQL connection string on Vercel."
             ) from None
-    allowed_origins = _cors_allow_origins()
+    allowed_origins = _cors_allow_origins(local_runtime=runtime == "local")
     mcp_enabled = McpConfig.from_environment().enabled and not is_vercel
     engine = create_database_engine(resolved_database_url)
     session_factory = create_session_factory(engine)

@@ -723,6 +723,19 @@ def test_date_correction_requires_session_context() -> None:
     assert with_context.entities.requested_date == "saturday"
 
 
+def test_date_only_follow_up_requires_pending_availability_context() -> None:
+    without_context = classify_with_rules("What about Saturday?")
+    with_context = classify_with_rules(
+        "What about Saturday?",
+        has_pending_availability_context=True,
+    )
+
+    assert without_context.status is ClassificationStatus.CLARIFICATION
+    assert with_context.status is ClassificationStatus.CLASSIFIED
+    assert with_context.intents == (Intent.APPOINTMENT_DATE_CORRECTION,)
+    assert with_context.entities.requested_date == "saturday"
+
+
 def test_unknown_or_ambiguous_messages_clarify_without_guessing() -> None:
     assert classify_with_rules("Tell me something.").status is ClassificationStatus.CLARIFICATION
     unknown_service = classify_with_rules("Do you offer hair coloring?")

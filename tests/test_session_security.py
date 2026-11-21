@@ -220,6 +220,7 @@ def test_health_endpoint_requires_no_session_token(tmp_path):
 
 def test_cors_allows_only_configured_frontend_origin(tmp_path, monkeypatch):
     allowed_origin = "https://techohub-ai-customer-calling-agent.vercel.app"
+    monkeypatch.setenv("TECHOHUB_RUNTIME", "auto")
     monkeypatch.setenv("TECHOHUB_CORS_ORIGINS", allowed_origin)
     app = _create_app(tmp_path)
 
@@ -245,3 +246,85 @@ def test_cors_allows_only_configured_frontend_origin(tmp_path, monkeypatch):
     assert allowed.headers["access-control-allow-origin"] == allowed_origin
     assert denied.status_code == 400
     assert "access-control-allow-origin" not in denied.headers
+
+
+@pytest.mark.parametrize(
+    "origin",
+    ["http://127.0.0.1:5173", "http://localhost:5173"],
+)
+def test_local_cors_defaults_allow_authenticated_session_lifecycle(
+    tmp_path, monkeypatch, origin
+):
+    monkeypatch.setenv("TECHOHUB_RUNTIME", "local")
+    monkeypatch.delenv("TECHOHUB_CORS_ORIGINS", raising=False)
+    app = _create_app(tmp_path)
+
+    with TestClient(app) as client:
+        preflight = client.options(
+            "/api/sessions",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-session-token",
+            },
+        )
+        created = client.post(
+            "/api/sessions",
+            json={"channel_type": "text_web"},
+            headers={"Origin": origin},
+        )
+        session_id = created.json()["session"]["session_id"]
+        token = created.json()["access_token"]
+        status = client.get(
+            f"/api/sessions/{session_id}",
+            headers={"Origin": origin, "X-Session-Token": token},
+        )
+        message = client.post(
+            f"/api/sessions/{session_id}/messages",
+            json=_message_payload(UUID(session_id)),
+            headers={"Origin": origin, "X-Session-Token": token},
+        )
+        missing_token = client.get(
+            f"/api/sessions/{session_id}", headers={"Origin": origin}
+        )
+        wrong_token = client.get(
+            f"/api/sessions/{session_id}",
+            headers={"Origin": origin, "X-Session-Token": "wrong-token"},
+        )
+
+    assert preflight.status_code == 200
+    assert preflight.headers["access-control-allow-origin"] == origin
+    assert "x-session-token" in preflight.headers["access-control-allow-headers"].lower()
+    assert created.status_code == 201
+    assert status.status_code == 200
+    assert message.status_code == 200
+    assert missing_token.status_code == 401
+    assert wrong_token.status_code == 401
+
+
+def test_local_cors_keeps_defaults_and_adds_configured_vite_origin(monkeypatch):
+    from backend.main import _cors_allow_origins
+
+    monkeypatch.setenv(
+        "TECHOHUB_CORS_ORIGINS",
+        "http://localhost:5174,http://127.0.0.1:5173",
+    )
+
+    assert _cors_allow_origins(local_runtime=True) == [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+    ]
+
+
+def test_nonlocal_cors_does_not_add_local_defaults(monkeypatch):
+    from backend.main import _cors_allow_origins
+
+    monkeypatch.setenv(
+        "TECHOHUB_CORS_ORIGINS",
+        "https://techohub-ai-customer-calling-agent.vercel.app",
+    )
+
+    assert _cors_allow_origins() == [
+        "https://techohub-ai-customer-calling-agent.vercel.app"
+    ]

@@ -48,14 +48,21 @@ from backend.mcp_client import McpClient, McpConfig, McpConnectionError
 
 
 HANDOFF_CONFIRMATION_PROMPT = (
-    "Would you like me to create a queued support ticket for staff to follow up? "
-    "Please reply yes or no."
+    "Would you like me to create a support ticket for staff to follow up? "
+    "You can say 'Yes, create a ticket' or 'No, cancel the request'."
 )
 HANDOFF_CLARIFICATION_PROMPT = (
-    "Please say yes or no, or use the confirmation buttons."
+    "I didn't catch that. Please say 'Yes, create a ticket' or "
+    "'No, cancel the request'."
 )
 HANDOFF_CONFLICT_PROMPT = (
-    "I heard both yes and no. Would you like me to create a support ticket?"
+    "I heard both yes and no. Would you like me to create a support ticket "
+    "for staff to follow up? Say 'Yes, create a ticket' or "
+    "'No, cancel the request'."
+)
+HANDOFF_ACKNOWLEDGMENT = "You're welcome!"
+HANDOFF_PENDING_ACKNOWLEDGMENT_PROMPT = (
+    f"{HANDOFF_ACKNOWLEDGMENT} {HANDOFF_CONFIRMATION_PROMPT}"
 )
 
 # Conversational intent patterns - small-talk and status queries that are
@@ -78,9 +85,16 @@ _GREETING_PHRASES = frozenset(
 _GREETING_WORDS = frozenset({"hello", "hi", "hey", "howdy", "hiya"})
 
 _THANKS_PHRASES = frozenset(
-    {"thank you", "thank you very much", "thanks a lot", "thankyou", "thank u"}
+    {
+        "thank you",
+        "thank you very much",
+        "thanks a lot",
+        "thankyou",
+        "thank u",
+        "appreciate it",
+    }
 )
-_THANKS_WORDS = frozenset({"thanks", "thx", "ty"})
+_THANKS_WORDS = frozenset({"thank", "thanks", "thx", "ty"})
 
 _ACKNOWLEDGEMENT_PHRASES = frozenset(
     {"copy that", "got it", "gotcha"}
@@ -314,6 +328,13 @@ class ConversationWorkflow:
                         classification_source=ClassifierSource.RULES,
                         outcome="answered",
                     )
+                if decision == "acknowledge":
+                    return ConversationWorkflowResult(
+                        response_text=HANDOFF_PENDING_ACKNOWLEDGMENT_PROMPT,
+                        intents=(Intent.HUMAN_REQUEST,),
+                        classification_source=ClassifierSource.RULES,
+                        outcome="answered",
+                    )
                 if decision == "reject":
                     return ConversationWorkflowResult(
                         response_text=(
@@ -453,7 +474,16 @@ class ConversationWorkflow:
                 or originating_message.role != MessageRole.CUSTOMER.value
             ):
                 return None
+            if assistant_message.text == HANDOFF_PENDING_ACKNOWLEDGMENT_PROMPT:
+                index -= 2
+                continue
             if HANDOFF_CONFIRMATION_PROMPT in assistant_message.text:
+                if (
+                    decision is None
+                    and _conversational_response(request.message_text)
+                    == HANDOFF_ACKNOWLEDGMENT
+                ):
+                    return "acknowledge", originating_message.id
                 if (
                     decision is None
                     and classify_with_rules(request.message_text).status
@@ -1020,6 +1050,8 @@ def _handoff_confirmation_decision(text: str) -> str | None:
         "no thanks",
         "no thank you",
         "no please",
+        "no cancel the request",
+        "cancel the request",
         "not now",
         "don't create it",
         "do not create it",
@@ -1102,7 +1134,7 @@ def _conversational_response(text: str) -> str | None:
         if phrase in normalized:
             phrase_words = set(phrase.split())
             if phrase_words.issubset(tokens) and len(words) <= len(phrase_words) + 2:
-                return "You're welcome!"
+                return HANDOFF_ACKNOWLEDGMENT
     if normalized.rstrip(".!?") in _ACKNOWLEDGEMENT_PHRASES:
         return "Sure."
     for phrase in _GREETING_PHRASES:
@@ -1134,7 +1166,7 @@ def _conversational_response(text: str) -> str | None:
             if word in _GREETING_WORDS:
                 return "Hello! How can I help you today?"
             if word in _THANKS_WORDS:
-                return "You're welcome!"
+                return HANDOFF_ACKNOWLEDGMENT
             if word in _ACKNOWLEDGEMENT_WORDS:
                 return "Sure."
 

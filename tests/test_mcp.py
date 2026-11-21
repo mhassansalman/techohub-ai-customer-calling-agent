@@ -246,7 +246,7 @@ async def test_mcp_support_confirmation_preserved() -> None:
             "support_info", {"intent": "human_request"}
         )
         assert not result["is_error"]
-        assert "reply yes or no" in result["content"]
+        assert "Yes, create a ticket" in result["content"]
         assert result["content"].count("ticket") >= 1
 
 
@@ -715,7 +715,7 @@ def test_support_confirmation_repeated_requests(tmp_path: Path) -> None:
     )
     assert result["intent"] == Intent.HUMAN_REQUEST
     assert result["outcome"] == "handoff_unavailable"
-    assert "reply yes or no" in result["text"]
+    assert "Yes, create a ticket" in result["text"]
 
     # Booking create → unsupported booking message (no ticket)
     result = agent.handle(

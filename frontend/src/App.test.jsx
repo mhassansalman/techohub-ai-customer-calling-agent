@@ -371,8 +371,8 @@ describe("Call-Only experience", () => {
     expect(voice.recognitions).toHaveLength(1);
     expect(screen.queryByRole("textbox", { name: "Your message" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Browse Services" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Yes, create ticket" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "No, thanks" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create Ticket" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "End Call" })).toBeEnabled();
   });
 
@@ -407,7 +407,7 @@ describe("Call-Only experience", () => {
     "sends spoken handoff response %s through the existing message API",
     async (answer) => {
       const prompt =
-        "Would you like me to create a queued support ticket for staff to follow up? Please reply yes or no.";
+        "Would you like me to create a support ticket for staff to follow up? You can say 'Yes, create a ticket' or 'No, cancel the request'.";
       const calls = mockApi({ assistantText: [prompt, "Your response was recorded."] });
       const voice = mockVoice();
       render(<App />);
@@ -427,8 +427,8 @@ describe("Call-Only experience", () => {
         modality: "speech_transcript",
         message_text: answer,
       });
-      expect(screen.queryByRole("button", { name: "Yes, create ticket" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "No, thanks" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Create Ticket" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
     },
   );
 
@@ -775,7 +775,7 @@ describe("browser text chat", () => {
 
   it("keeps handoff confirmation and catalog selection available across mode switches", async () => {
     const confirmation =
-      "Would you like me to create a queued support ticket for staff to follow up? Please reply yes or no.";
+      "Would you like me to create a support ticket for staff to follow up? You can say 'Yes, create a ticket' or 'No, cancel the request'.";
     const calls = mockApi({
       assistantText: [confirmation, "Your response was recorded."],
     });
@@ -790,9 +790,9 @@ describe("browser text chat", () => {
     await user.click(screen.getByRole("radio", { name: "Live Call Mode" }));
     await waitFor(() => expect(voice.recognitions).toHaveLength(1));
     await user.click(screen.getByRole("radio", { name: "Mic Mode" }));
-    expect(screen.getByRole("button", { name: "Yes, create ticket" })).toBeEnabled();
-    await user.click(screen.getByRole("button", { name: "Yes, create ticket" }));
-    expect(await screen.findByText("yes")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Ticket" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Create Ticket" }));
+    expect(await screen.findByText("Yes, create a ticket")).toBeInTheDocument();
     expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(2);
 
     await user.click(screen.getByRole("button", { name: "Browse Services" }));
@@ -950,7 +950,11 @@ describe("browser text chat", () => {
     expect(calls.filter((call) => call.url === "/api/sessions")).toHaveLength(1);
     expect(calls.some((call) => call.url === `/api/sessions/${SESSION_ID}`)).toBe(true);
     expect(screen.getByRole("note")).toHaveTextContent(/automated assistant/i);
-    expect(screen.getByText(/answers use approved salon information and recorded sample appointment slots/i)).toBeInTheDocument();
+    const demoNote = screen.getByText(
+      /answers use approved salon information and recorded sample appointment slots/i,
+    );
+    expect(demoNote).toHaveTextContent(/support ticket requests can be recorded after confirmation/i);
+    expect(demoNote).toHaveTextContent(/live staff interaction and real appointment booking are not available/i);
   });
 
   it("sends the normalized text_web contract and renders both messages in sequence", async () => {
@@ -987,19 +991,19 @@ describe("browser text chat", () => {
 
   it.each([
     [
-      "yes",
-      "Yes, create ticket",
-      "Would you like me to create a queued support ticket for staff to follow up? Please reply yes or no.",
+      "Yes, create a ticket",
+      "Create Ticket",
+      "Would you like me to create a support ticket for staff to follow up? You can say 'Yes, create a ticket' or 'No, cancel the request'.",
     ],
     [
-      "no",
-      "No, thanks",
-      "Would you like me to create a queued support ticket for staff to follow up? Please reply yes or no.",
+      "No, cancel the request",
+      "Cancel",
+      "Would you like me to create a support ticket for staff to follow up? You can say 'Yes, create a ticket' or 'No, cancel the request'.",
     ],
     [
-      "yes",
-      "Yes, create ticket",
-      "I heard both yes and no. Would you like me to create a support ticket?",
+      "Yes, create a ticket",
+      "Create Ticket",
+      "I heard both yes and no. Would you like me to create a support ticket for staff to follow up? Say 'Yes, create a ticket' or 'No, cancel the request'.",
     ],
   ])("submits the %s handoff button through the existing message API", async (answer, buttonName, confirmation) => {
     const calls = mockApi({
@@ -1009,6 +1013,8 @@ describe("browser text chat", () => {
     render(<App />);
     await waitForReady();
     await user.type(screen.getByRole("textbox", { name: "Your message" }), "I need a human.");
+    expect(screen.queryByRole("button", { name: "Create Ticket" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
     await user.keyboard("{Enter}");
     await screen.findByText(confirmation);
 
@@ -1019,8 +1025,175 @@ describe("browser text chat", () => {
     const messageCalls = calls.filter((call) => call.url.endsWith("/messages"));
     expect(messageCalls).toHaveLength(2);
     expect(JSON.parse(messageCalls[1].options.body).message_text).toBe(answer);
-    expect(screen.queryByRole("button", { name: "Yes, create ticket" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "No, thanks" })).not.toBeInTheDocument();
+    expect(messageCalls[1].options.headers["X-Session-Token"]).toBe(
+      "test-session-token-1",
+    );
+    expect(screen.queryByRole("button", { name: "Create Ticket" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["Create Ticket", "Your support ticket was recorded."],
+    ["Cancel", "The support request was cancelled."],
+  ])("speaks the %s response once in Mic Mode", async (buttonName, assistantText) => {
+    const confirmation =
+      "Would you like me to create a support ticket for staff to follow up? You can say 'Yes, create a ticket' or 'No, cancel the request'.";
+    const calls = mockApi({ assistantText: [confirmation, assistantText] });
+    const voice = mockVoice();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady({ mode: "message" });
+    await user.type(screen.getByRole("textbox", { name: "Your message" }), "I need a human.");
+    await user.keyboard("{Enter}");
+    await screen.findByText(confirmation);
+
+    await user.click(screen.getByRole("radio", { name: "Mic Mode" }));
+    await user.click(screen.getByRole("button", { name: buttonName }));
+    expect(await screen.findByText(assistantText)).toBeInTheDocument();
+    await waitFor(() => expect(voice.synthesis.speak).toHaveBeenCalledOnce());
+    expect(voice.utterances[0].text).toBe(assistantText);
+    expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(2);
+  });
+
+  it("keeps confirmation-button responses text-only in Message Mode", async () => {
+    const confirmation =
+      "Would you like me to create a support ticket for staff to follow up? You can say 'Yes, create a ticket' or 'No, cancel the request'.";
+    mockApi({ assistantText: [confirmation, "Your support ticket was recorded."] });
+    const voice = mockVoice();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady({ mode: "message" });
+    await user.type(screen.getByRole("textbox", { name: "Your message" }), "I need a human.");
+    await user.keyboard("{Enter}");
+    await screen.findByText(confirmation);
+
+    await user.click(screen.getByRole("button", { name: "Create Ticket" }));
+    expect(await screen.findByText("Your support ticket was recorded.")).toBeInTheDocument();
+    expect(voice.synthesis.speak).not.toHaveBeenCalled();
+  });
+
+  it("speaks a Live Call confirmation-button response once, then resumes listening", async () => {
+    const confirmation =
+      "Would you like me to create a support ticket for staff to follow up? You can say 'Yes, create a ticket' or 'No, cancel the request'.";
+    const calls = mockApi({
+      assistantText: [confirmation, "Your support ticket was recorded."],
+    });
+    const voice = mockVoice();
+    render(<App />);
+    await waitForReady({ liveCallMode: true });
+
+    emitRecognitionResult(voice.recognitions[0], "I need a human.");
+    await screen.findByText(confirmation);
+    await waitFor(() => expect(voice.synthesis.speak).toHaveBeenCalledOnce());
+    voice.utterances[0].onend();
+    await waitFor(() => expect(voice.recognitions).toHaveLength(2));
+    voice.synthesis.speak.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Ticket" }));
+    expect(await screen.findByText("Your support ticket was recorded.")).toBeInTheDocument();
+    await waitFor(() => expect(voice.synthesis.speak).toHaveBeenCalledOnce());
+    expect(voice.utterances[1].text).toBe("Your support ticket was recorded.");
+    expect(voice.recognitions).toHaveLength(2);
+    expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(2);
+
+    voice.utterances[1].onend();
+    await waitFor(() => expect(voice.recognitions).toHaveLength(3));
+  });
+
+  it("does not speak a confirmation response that arrives after End Call", async () => {
+    let releaseResponse;
+    const delayedResponse = new Promise((resolve) => {
+      releaseResponse = resolve;
+    });
+    const confirmation =
+      "Would you like me to create a support ticket for staff to follow up? You can say 'Yes, create a ticket' or 'No, cancel the request'.";
+    const calls = mockApi({
+      assistantText: [confirmation, "Your support ticket was recorded."],
+      sendDelay: [undefined, delayedResponse],
+    });
+    const voice = mockVoice();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady({ mode: "message" });
+    await user.type(screen.getByRole("textbox", { name: "Your message" }), "I need a human.");
+    await user.keyboard("{Enter}");
+    await screen.findByText(confirmation);
+    await user.click(screen.getByRole("radio", { name: "Mic Mode" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Ticket" }));
+    await waitFor(() =>
+      expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(2),
+    );
+    await user.click(screen.getByRole("button", { name: "End Call" }));
+    await screen.findByText("Conversation ended. Your messages were saved.");
+
+    releaseResponse();
+    expect(await screen.findByText("Your support ticket was recorded.")).toBeInTheDocument();
+    expect(voice.synthesis.speak).not.toHaveBeenCalled();
+  });
+
+  it("submits and speaks only once when a confirmation button is clicked repeatedly", async () => {
+    let releaseResponse;
+    const delayedResponse = new Promise((resolve) => {
+      releaseResponse = resolve;
+    });
+    const confirmation =
+      "Would you like me to create a support ticket for staff to follow up? You can say 'Yes, create a ticket' or 'No, cancel the request'.";
+    const calls = mockApi({
+      assistantText: [confirmation, "Your support ticket was recorded."],
+      sendDelay: [undefined, delayedResponse],
+    });
+    const voice = mockVoice();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady({ mode: "message" });
+    await user.type(screen.getByRole("textbox", { name: "Your message" }), "I need a human.");
+    await user.keyboard("{Enter}");
+    await screen.findByText(confirmation);
+    await user.click(screen.getByRole("radio", { name: "Mic Mode" }));
+
+    const createButton = screen.getByRole("button", { name: "Create Ticket" });
+    fireEvent.click(createButton);
+    fireEvent.click(createButton);
+    expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(2);
+    expect(createButton).toBeDisabled();
+
+    releaseResponse();
+    expect(await screen.findByText("Your support ticket was recorded.")).toBeInTheDocument();
+    await waitFor(() => expect(voice.synthesis.speak).toHaveBeenCalledOnce());
+    expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(2);
+  });
+
+  it("keeps ticket actions available after ambiguous confirmation", async () => {
+    const confirmation =
+      "Would you like me to create a support ticket for staff to follow up? You can say 'Yes, create a ticket' or 'No, cancel the request'.";
+    const clarification =
+      "I didn't catch that. Please say 'Yes, create a ticket' or 'No, cancel the request'.";
+    const calls = mockApi({
+      assistantText: [confirmation, clarification, "Your response was recorded."],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForReady();
+    await user.type(screen.getByRole("textbox", { name: "Your message" }), "I need a human.");
+    await user.keyboard("{Enter}");
+    await screen.findByText(confirmation);
+
+    await user.type(screen.getByRole("textbox", { name: "Your message" }), "not sure");
+    await user.keyboard("{Enter}");
+    await screen.findByText(clarification);
+    expect(screen.getByRole("button", { name: "Create Ticket" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Create Ticket" }));
+    await screen.findByText("Your response was recorded.");
+    const messageCalls = calls.filter((call) => call.url.endsWith("/messages"));
+    expect(messageCalls).toHaveLength(3);
+    expect(JSON.parse(messageCalls[2].options.body).message_text).toBe(
+      "Yes, create a ticket",
+    );
+    expect(messageCalls[2].options.headers["X-Session-Token"]).toBe(
+      "test-session-token-1",
+    );
   });
 
   it("disables handoff buttons while a confirmation response is being submitted", async () => {
@@ -1029,7 +1202,7 @@ describe("browser text chat", () => {
       releaseResponse = resolve;
     });
     const confirmation =
-      "Would you like me to create a queued support ticket for staff to follow up? Please reply yes or no.";
+      "Would you like me to create a support ticket for staff to follow up? You can say 'Yes, create a ticket' or 'No, cancel the request'.";
     const calls = mockApi({
       assistantText: [confirmation, "Your response has been recorded."],
       sendDelay: [Promise.resolve(), delayedResponse],
@@ -1041,9 +1214,11 @@ describe("browser text chat", () => {
     await user.keyboard("{Enter}");
     await screen.findByText(confirmation);
 
-    fireEvent.click(screen.getByRole("button", { name: "Yes, create ticket" }));
-    expect(screen.getByRole("button", { name: "Yes, create ticket" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "No, thanks" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Create Ticket" }));
+    expect(screen.getByRole("button", { name: "Create Ticket" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Create Ticket" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     releaseResponse();
     await screen.findByText("Your response has been recorded.");
     expect(calls.filter((call) => call.url.endsWith("/messages"))).toHaveLength(2);
@@ -1263,12 +1438,12 @@ describe("browser text chat", () => {
     expect(voice.utterances[0].text).not.toBe("Are you open Wednesday?");
   });
 
-  it("keeps typed-message responses text-only by default", async () => {
+  it("keeps typed-message responses text-only in Message Mode", async () => {
     mockApi({ assistantText: "A grounded typed answer." });
     const voice = mockVoice();
     const user = userEvent.setup();
     render(<App />);
-    await waitForReady();
+    await waitForReady({ mode: "message" });
     await user.type(screen.getByRole("textbox", { name: "Your message" }), "Typed question");
     await user.keyboard("{Enter}");
 
@@ -1595,7 +1770,7 @@ describe("browser text chat", () => {
     "restarts after handoff confirmation TTS and submits final %s unchanged once",
     async (answer) => {
       const confirmation =
-        "Would you like me to create a queued support ticket for staff to follow up? Please reply yes or no.";
+        "Would you like me to create a support ticket for staff to follow up? You can say 'Yes, create a ticket' or 'No, cancel the request'.";
       const calls = mockApi({ assistantText: confirmation });
       const voice = mockVoice();
       render(<App />);

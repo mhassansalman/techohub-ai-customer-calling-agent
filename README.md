@@ -138,7 +138,10 @@ capabilities and limitations.
 Keep `VITE_API_BASE_URL` unset for local Vite development (it defaults to `/api`).
 For a separate hosted backend, its value must include the `/api` prefix, for
 example `https://example-backend.example/api`. The Vite proxy makes local
-browser requests same-origin, so local CORS permissions are unnecessary.
+browser requests same-origin. The local backend also allows the standard
+`localhost:5173` and `127.0.0.1:5173` origins for direct local API requests;
+set `TECHOHUB_CORS_ORIGINS` to add another local frontend origin or Vite port.
+Production continues to allow only explicitly configured origins.
 
 Session creation returns an `access_token` separately from the public session
 ID. Send it in `X-Session-Token` for status, message, and end requests. Missing,
