@@ -1,205 +1,170 @@
-# TECHOHUB AI Customer Calling Agent
+# AI Customer Calling Agent — TECHOHUB
 
-An academic prototype of a transparent, knowledge-grounded customer-service
-assistant for a fictional salon. The local backend includes persistent session
-lifecycle endpoints and an internal deterministic knowledge service.
+**A browser-based, multi-agent customer-service assistant for a demo salon.** Customers can ask about haircut and beard-trim services, prices, durations, business hours, and sample appointment availability; they can also request a follow-up from staff through a confirmation-based support ticket.
 
-## Scope
+**[Try the live demo](https://techohub-ai-customer-calling-agent-git-deployment-75e2ae-yoink6.vercel.app)** · **[Explore the architecture](docs/03_SYSTEM_ARCHITECTURE.md)** · **[Browse the documentation](docs/00_MASTER_INDEX.md)**
 
-- **P0 (mandatory):** implement the required Week 1 and subsequent core
-  deliverables in the traceable backlog.
-- **P1 (optional):** pursue enhancements only after P0 priorities and approvals.
-- **P2 (excluded):** do not implement excluded-scope features.
+> **Demo scope:** This is a deployed **browser-based** assistant, not a telephone-network calling service. It uses approved fictional salon data and recorded sample appointment slots. It **does not** make real bookings, connect callers to live staff, or place outbound telephone calls. Voice recognition depends on browser support and microphone permissions.
 
-The active scope and task tracking are in the
-[V2 development plan](assignment/03_Revised_Development_Plan_v2.md),
-[V2 traceable backlog](assignment/04_Revised_Traceable_Backlog_v2.md), and
-[V2 machine-readable task backlog](assignment/task_backlog_v2.json).
+## What the assistant can do
 
-## Local setup
+| Capability | What it demonstrates |
+| --- | --- |
+| **Text and browser voice** | Message Mode, Mic Mode, and browser-based call experiences; speech recognition converts voice to text, and supported voice modes can speak responses. |
+| **Grounded service answers** | Answers about catalog services, prices, durations, and opening hours using approved salon information rather than invented facts. |
+| **Sample appointment availability** | Reads **recorded fixture slots**, clearly distinguished from live calendar availability; supports contextual date correction. |
+| **Multiple intents** | Routes compound customer questions through a multi-intent workflow and aggregates supported results. Complex queries may still require clarification or omit a sub-question. |
+| **Human follow-up requests** | Offers a support ticket when someone asks for staff, creates it only after explicit confirmation, and returns a ticket ID. |
+| **Persistent sessions** | Stores conversation/session records and queued tickets; deployed Preview uses Neon PostgreSQL, while local development uses SQLite. |
+| **Security boundaries** | Session-scoped access tokens, protected staff APIs, server-side secrets, and no unsupported claims of completed real-world actions. |
 
-Requirements: Python 3.12 and Node.js/npm for the planned browser client.
-Docker is not required.
+### Example questions
 
-From PowerShell:
+- “How much is a haircut?”
+- “How long does a beard trim take?”
+- “Are you open on Saturday?”
+- “What sample appointment slots are available?”
+- “I want to talk to a human.” → **“Create a ticket.”**
+
+## How it works
+
+```mermaid
+flowchart TD
+    A[Customer] --> B[React UI / channel adapters]
+    B -->|Typed text| D[FastAPI: normalized message + session authorization]
+    B -->|Microphone| C[Browser STT: speech to text]
+    C --> D
+    D --> E[Hybrid intent routing: deterministic rules / optional Groq fallback]
+    E --> F[Complexity assessment]
+    F --> G[LangGraph workflow]
+    G --> H[FAQ and service information]
+    G --> I[Recorded availability + date context]
+    G --> J[Support-ticket confirmation]
+    G --> K[Multi-intent / clarification]
+    H --> L[Approved knowledge: fixtures, OKF and RAG]
+    I --> M[Aggregate and ground response]
+    J --> M
+    K --> M
+    L --> M
+    M --> N[Persist session and messages]
+    N --> O[Customer-facing text reply]
+    O --> P[Optional browser TTS in voice modes]
+```
+
+**The key design idea:** Channel adapters give the backend a consistent text-message interface. A **rules-first intent classifier**, with optional LLM classification for unresolved cases, identifies the request; a separate complexity decision helps choose the workflow. **LangGraph** coordinates specialist capabilities and response aggregation. **OKF** (Open Knowledge Format) and **RAG** (Retrieval-Augmented Generation) help ground factual answers in approved business information. Selected capabilities can be reached through **direct tool calls or MCP (Model Context Protocol)** interfaces; MCP is the tool interface, not a separate model. The final response is saved and returned as text, with optional browser text-to-speech.
+
+**Knowledge safety:** Canonical approved fixtures take precedence when they conflict with other retrieved knowledge. Unsupported answers should be declined or clarified rather than invented.
+
+For implementation details, see the [architecture document](docs/03_SYSTEM_ARCHITECTURE.md) and the **“View how TECHOHUB works”** page in the running frontend.
+
+## Technology stack
+
+| Layer | Technologies / responsibility |
+| --- | --- |
+| Frontend | **React, JavaScript, Vite** — user interface, channel controls, browser STT/TTS integration |
+| Backend | **Python, FastAPI, Pydantic** — REST endpoints, validation, session lifecycle |
+| Agent workflow | **LangGraph** — conditional routing, specialist workflow nodes, state and response aggregation |
+| Model integration | **Groq** — optional LLM-backed intent classification / supported agent processing |
+| Knowledge and tools | **OKF, RAG, MCP**, approved fixtures, direct application capabilities |
+| Persistence | **SQLAlchemy, SQLite** (local), **Neon PostgreSQL** (deployed Preview) |
+| Deployment and tests | **Vercel** frontend/backend, **pytest**, frontend test/build tooling |
+
+## Live deployment
+
+**Frontend (stable Preview):**
+
+https://techohub-ai-customer-calling-agent-git-deployment-75e2ae-yoink6.vercel.app
+
+The deployed **Preview** pair was tested end to end: frontend access, backend health, CORS preflight, authenticated session creation, message persistence, and a grounded haircut-price response. That verification does **not** guarantee every voice mode, browser, or complex query will behave identically.
+
+The deployed configuration uses separate Vercel frontend and FastAPI projects, with branch-scoped environment variables and an isolated Neon Preview database. Preview-domain access and Vercel Deployment Protection must be configured together so browser requests can reach the backend; **Production and Preview are different environments**.
+
+See [Free deployment guide](docs/17_FREE_DEPLOYMENT_GUIDE.md) for setup considerations. Do not copy production credentials into frontend environment variables or check them into Git.
+
+## Run locally
+
+**Requirements:** Python **3.12**, Node.js/npm. Docker is not required.
+
+### 1. Clone and install the backend
 
 ```powershell
+git clone https://github.com/mhassansalman/techohub-ai-customer-calling-agent.git
+cd techohub-ai-customer-calling-agent
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
 python -m pip install -r requirements.lock.txt
 ```
 
-In Git Bash:
+If PowerShell restricts activation, call `.\.venv\Scripts\python.exe` directly. In Git Bash, activate with `source .venv/Scripts/activate`.
 
-```bash
-py -3.12 -m venv .venv
-source .venv/Scripts/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.lock.txt
-```
-
-If PowerShell activation is restricted, run the environment directly:
+### 2. Start the backend
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-`requirements.in` records the direct Week 1 Python dependencies;
-`requirements.lock.txt` pins the resolved environment. Frontend dependencies
-are pinned in `frontend/package.json` and `frontend/package-lock.json`. Install
-them from PowerShell with:
+The local database defaults to ignored SQLite storage (`data/techohub.db`). The deterministic rule-based flows can run without a Groq key; optional LLM-backed behavior requires server-side `GROQ_API_KEY` configuration.
+
+### 3. Start the frontend in a second terminal
 
 ```powershell
-Push-Location frontend
-npm.cmd ci
-Pop-Location
-```
-
-The P12 browser text chat is a client of the session lifecycle API. P13 routes
-messages through grounded FAQ and read-only availability capabilities. Customers
-can explicitly confirm a queued support ticket, persisted with the conversation;
-protected staff endpoints provide read-only ticket list and detail access. Booking
-writes, CRM access, and real staff transfer or outbound telephony remain
-unimplemented. The compatibility page below remains a separate P03 spike.
-Do not commit `.env` files, credentials, local databases, or generated
-recordings.
-
-## Backend scaffold
-
-The FastAPI application currently exposes the session lifecycle API below.
-Start it from the repository root after installing the Python dependencies:
-
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload
-```
-
-### Session lifecycle API
-
-- `POST /api/sessions` — create a session and persist the automated-assistant
-  disclosure.
-- `POST /api/sessions/{session_id}/messages` — persist a normalized text turn,
-  run the LangGraph conversation workflow, and persist its grounded response.
-- `POST /api/sessions/{session_id}/end` — close an active session with a
-  documented outcome.
-- `GET /api/sessions/{session_id}` — return session status and record counts,
-  not transcript content.
-
-### Run the P12 browser text chat
-
-Run the backend from the repository root in one PowerShell terminal:
-
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-In a second terminal, start the Vite development server:
-
-```powershell
-Push-Location frontend
+cd frontend
 npm.cmd ci
 npm.cmd run dev
-Pop-Location
 ```
 
-Open the local URL printed by Vite (by default `http://127.0.0.1:5173`).
-The development server proxies `/api` requests to `127.0.0.1:8000`; no API
-key or provider credential is sent to the browser. Run the frontend tests and
-production build from the `frontend` directory with `npm.cmd test` and
-`npm.cmd run build`.
+Open the local Vite URL (typically `http://127.0.0.1:5173`). The development proxy forwards `/api` requests to the backend on `127.0.0.1:8000`.
 
-Session history can be read by the persistence layer for tests and trusted
-application code. A transcript-reading HTTP endpoint is intentionally absent
-until staff access control is implemented. The default local SQLite database
-is `data/techohub.db`; it is ignored by Git.
+The exact latest deployment configuration lives in the separate deployment branch, **`deployment/vercel-from-local-recovery`**. This README documents the public repository and previously verified Preview architecture; if running `main`, treat its code and configuration as authoritative for that checkout rather than assuming branch parity.
 
-### Internal knowledge service
-
-`backend.knowledge.KnowledgeService` provides deterministic, source-traceable
-answers using the approved Demo Salon fixture for operating hours and catalog
-services. It safely abstains on unsupported policies and appointment-slot
-questions. No approved FAQ Markdown bundle currently exists, so unsupported
-policy answers remain unavailable. An optional OKF bundle can be loaded from
-an `index.md`; only index-linked, frontmatter-marked approved FAQ records are
-eligible. The P13 workflow routes FAQ intents to this service.
-
-`backend.availability.AvailabilityService` returns only recorded canonical
-fixture slots and explicitly labels them as fixture data, not live calendar
-availability. `AvailabilityConversationService` supports the deterministic
-Friday-to-Saturday correction through session-scoped context persisted in
-SQLite. The context stores only the selected service and requested date; it is
-isolated by session and survives a process/database reconnection. The service
-does not create, modify, or cancel appointments. The P13 workflow invokes it
-for availability and date-correction intents.
-
-### Internal intent classification
-
-`backend.intent.RuleFirstIntentClassifier` classifies supported requests with
-deterministic rules first and uses the Groq adapter only when a safe local
-classification cannot be established. Provider output is validated locally
-with Pydantic; classification does not answer requests, invoke tools, or
-execute business actions. `backend.workflow.ConversationWorkflow` is the
-LangGraph router used by the session message endpoint. It combines the
-classifier with grounded FAQ and read-only fixture availability capabilities.
-Booking writes, customer-account access, and live staff transfer are not
-implemented; the workflow reports those limitations rather than claiming
-those actions succeeded. Customers can explicitly confirm a queued support
-ticket, which is persisted with the conversation.
-
-Groq configuration is optional for local rules and tests. To enable model
-classification, set `GROQ_API_KEY` in the ignored local `.env` file or process
-environment. `GROQ_MODEL` defaults to `openai/gpt-oss-20b`;
-`GROQ_TIMEOUT_SECONDS`, `GROQ_MAX_RETRIES`, `GROQ_TOTAL_DEADLINE_SECONDS`, and
-`GROQ_BACKOFF_SECONDS` can tune the bounded retry policy (at most one retry,
-five seconds per attempt, and eight seconds total). Never commit `.env` or
-include the key in logs or command-line arguments.
-
-## Protected staff ticket API
-
-Set `STAFF_API_KEY` in the backend process environment. Keep this secret on the
-server; never expose it to the React frontend or commit it. Staff endpoints
-fail closed if the variable is missing or empty.
-
-- `GET /api/staff/tickets?limit=50` lists queued tickets (maximum 100).
-- `GET /api/staff/tickets/{ticket_id}` retrieves one ticket.
-
-Send the key in the `X-Staff-API-Key` header. For example, in PowerShell after
-setting the environment variable:
+### 4. Check the project
 
 ```powershell
-Invoke-RestMethod `
-  -Uri "http://127.0.0.1:8000/api/staff/tickets?limit=50" `
-  -Headers @{ "X-Staff-API-Key" = $env:STAFF_API_KEY }
+# From the repository root, with the virtual environment active
+python -m pytest
+
+# From frontend/
+npm.cmd test
+npm.cmd run build
 ```
 
-## P03 Chrome voice compatibility check
+## API overview
 
-This is a manual browser capability check, not a production voice integration.
-From the repository root, start the static test page:
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/sessions` | Create a session and record automated-assistant disclosure. |
+| `POST /api/sessions/{session_id}/messages` | Submit a normalized message, run the LangGraph workflow, and store the grounded response. |
+| `GET /api/sessions/{session_id}` | Read authorized session status and record counts, not a public transcript dump. |
+| `POST /api/sessions/{session_id}/end` | Close an active session with a documented outcome. |
+| `GET /api/staff/tickets?limit=50` | List queued support tickets for authorized staff (max 100). |
+| `GET /api/staff/tickets/{ticket_id}` | Retrieve one ticket for authorized staff. |
 
-```powershell
-py -3.12 -m http.server 8765 --directory frontend
-```
+Session-specific requests use an **`X-Session-Token`**. Staff ticket routes require a separately configured server-side **`STAFF_API_KEY`**, supplied in the **`X-Staff-API-Key`** header; those endpoints fail closed without the key. Never expose staff or LLM credentials to the browser.
 
-Open `http://localhost:8765/voice-compatibility.html` in Google Chrome. Allow
-microphone permission, test recognition using only the displayed harmless
-phrase, and use “Speak text” to verify audible output. Record the Chrome
-version, permission outcome, exact recognition result/error, and whether TTS
-was audible. Chrome speech recognition may use an online browser service; do
-not use personal or customer data. The page does not save recordings/results
-and does not call this application’s backend.
+### Knowledge and routing details
 
-## Free deployment (Vercel + Neon)
+- **`backend.intent.RuleFirstIntentClassifier`** applies deterministic classification and invokes the Groq adapter only when classification cannot be safely established locally. Its outputs are validated rather than blindly trusted.
+- **`backend.workflow.ConversationWorkflow`** uses LangGraph to route service/FAQ, availability, support, clarification, and multi-intent handling and assemble replies.
+- **`backend.knowledge.KnowledgeService`** serves source-traceable facts from approved salon fixtures and eligible approved knowledge records.
+- **`backend.availability.AvailabilityService`** exposes only recorded sample slots. Availability context can retain the selected service/date for follow-up corrections; it **never** modifies a real booking calendar.
+- **Support-ticket creation** is a confirmed, recorded action, not a live transfer.
 
-The deployment target is a separate Vercel Hobby FastAPI backend and Vercel
-Hobby React/Vite frontend, with Neon PostgreSQL for shared session persistence.
-Local development continues to default to SQLite. See
-[docs/17_FREE_DEPLOYMENT_GUIDE.md](docs/17_FREE_DEPLOYMENT_GUIDE.md) for the
-backend project settings, Neon connection configuration, environment variables,
-session authorization, and manual deployment checks.
+## Known limitations and safeguards
 
-The backend integration is configured locally; no public backend deployment,
-Neon connection, or live persistence test has been performed.
+- **No real salon integrations:** no real booking writes, CRM updates, staff transfers, or outbound PSTN telephone calls.
+- **Sample data only:** prices, opening hours, and slots are fictional approved demo information, not a public business directory.
+- **Voice behavior varies:** browser speech recognition can fail on short utterances, noise, permissions, and network/browser support. Microphone audio is not stored by this app; recognized transcripts can be saved with the conversation.
+- **Compound questions are not guaranteed:** some multi-intent duration questions may return only a subset of the requested facts.
+- **Confirmed actions only:** ticket requests require confirmation; protected staff operations remain separate from customer conversation access.
+- **Deployment-specific configuration:** CORS origins, Vercel protection exceptions, and frontend build-time API URLs must agree. Stable Preview aliases reduce URL churn but their public exception may also cover future deployments using those aliases.
+
+## Project scope and development records
+
+The engineering work was organized by priority: **P0** required scope, **P1** approved enhancements, and **P2** excluded features. The backlog and design documents record the assignment and implementation history, not a promise that excluded features have been completed.
+
+- [V2 development plan](assignment/03_Revised_Development_Plan_v2.md)
+- [V2 traceable backlog](assignment/04_Revised_Traceable_Backlog_v2.md)
+- [Machine-readable task backlog](assignment/task_backlog_v2.json)
 
 ## Documentation
 
@@ -207,16 +172,15 @@ Neon connection, or live persistence test has been performed.
 - [Project charter and scope](docs/01_PROJECT_CHARTER_AND_SCOPE.md)
 - [System architecture](docs/03_SYSTEM_ARCHITECTURE.md)
 - [Data model and database](docs/08_DATA_MODELS_AND_DATABASE.md)
-- [Tech stack and local deployment](docs/10_TECH_STACK_DEPLOYMENT_AND_CONFIG.md)
+- [Tech stack and deployment configuration](docs/10_TECH_STACK_DEPLOYMENT_AND_CONFIG.md)
 - [Architecture decisions and open questions](docs/12_ARCHITECTURE_DECISIONS_AND_OPEN_QUESTIONS.md)
 - [Implementation dependency order](docs/13_IMPLEMENTATION_SEQUENCE_AND_DEPENDENCIES.md)
-- [Active V2 traceable backlog](assignment/04_Revised_Traceable_Backlog_v2.md)
+- [Free deployment guide](docs/17_FREE_DEPLOYMENT_GUIDE.md)
 
-## How TECHOHUB works (architecture page)
+## Demo video
 
-The frontend includes a static "How TECHOHUB works" architecture/workflow page
-that walks through the customer request pipeline end to end: customer entry
-(Message / Mic / Live Call / Call-Only), channel-to-backend handoff, intent and
-routing, simple vs complex paths, knowledge/OKF retrieval, MCP, response output,
-and safety constraints. Open it from the experience picker via "View how
-TECHOHUB works" and return to the assistant with the back button.
+*A short walkthrough video can be linked here once recorded.* A hosted video with a clickable screenshot/thumbnail works well for GitHub readers and nontechnical reviewers.
+
+---
+
+**TECHOHUB** is the company name; **AI Customer Calling Agent** is the project. This repository demonstrates a grounded, multi-capability **browser** assistant using a fictional salon scenario—not a real salon booking or telephone service.
